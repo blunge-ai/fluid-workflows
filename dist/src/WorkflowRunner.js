@@ -13,7 +13,7 @@ export class InMemoryWorkflowRunner {
                 return { interrupted: false };
             }
         };
-        for (const step of workflow.steps.slice(1)) {
+        for (const step of workflow.steps) {
             result = await step(result, runOptions);
             if (result instanceof Workflow) {
                 result = await this.start(result);

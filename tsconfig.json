@@ -38,7 +38,7 @@
   },
   "include": [
     "eslint.config.mjs",
-    "**/*.ts",
+    "src/**/*.ts",
   ],
   "exclude": [
     "node_modules",

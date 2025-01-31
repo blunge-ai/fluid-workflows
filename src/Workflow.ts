@@ -20,8 +20,8 @@ export class Workflow<Input, Output> {
     public inputValue?: Input,
   ) {}
 
-  static create(opts: WorkflowOptions) {
-    return new Workflow(opts, [], false);
+  static create<Input>(opts: WorkflowOptions) {
+    return new Workflow<Input, Input>(opts, [], false);
   }
 
   input<Input>(input: Input) {

@@ -17,7 +17,7 @@ export class InMemoryWorkflowRunner implements WorkflowRunner {
         return { interrupted: false };
       }
     } satisfies WorkflowRunOptions;
-    for (const step of workflow.steps.slice(1)) {
+    for (const step of workflow.steps) {
       result = await step(result, runOptions);
       if (result instanceof Workflow) {
         result = await this.start(result);
