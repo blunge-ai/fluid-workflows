@@ -38,10 +38,6 @@ type JobData<Input, Meta> = {
   outputKey: string,
 };
 
-type StatusNotifierJobData = {
-  queue: string
-};
-
 export function bullQueue<Input, Output>(name: string, redis: Redis, attempts = 1) {
   return new BullQueue<Input, Output>(name, {
     connection: redis,
@@ -75,14 +71,14 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
   private redis: Redis;
   private queue: BullQueue<JobData<Input, Meta>, JobResult<Output>>;
   private worker: BullWorker<JobData<Input, Meta>, JobResult<Output>>;
-  private statusNotifierQueue: BullQueue<StatusNotifierJobData>;
+  private statusNotifierQueue: BullQueue;
   private opts: Opts<Meta, ProgressInfo>;
 
   constructor(opts: ConstructorOpts<Meta, ProgressInfo>) {
     this.opts = {
       redisConnection: defaultRedisConnection,
       blockingTimeoutSecs: 8,
-      statusNotifierQueueName: 'status-notifier',
+      statusNotifierQueueName: `${opts.queueName}/status-notifier`,
       statusNotifierRepeatMs: 2000,
       concurrency: 1,
       fallback: false,
@@ -107,8 +103,9 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     }
   }
   
-  async runStalledChecker() {
-    await this.worker.startStalledCheckTimer();
+  async startMaintenanceWorkers() {
+    void this.worker.startStalledCheckTimer();    
+    this.processStatusNotifierJobs();
   }
 
   async updateStatus({
@@ -232,9 +229,8 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
   }
 
   private addStatusNotifierJob() {
-    const jobData = { queue: this.opts.queueName } satisfies StatusNotifierJobData;
     this.opts.logger.info({ queue: this.opts.queueName }, 'adding status notifier job');
-    void this.statusNotifierQueue.add('statusNotifier', jobData, {
+    void this.statusNotifierQueue.add('statusNotifier', undefined, {
       jobId: `${this.opts.statusNotifierQueueName}/${this.opts.queueName}`,
       attempts: Number.MAX_SAFE_INTEGER,
       backoff: {
@@ -255,38 +251,31 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     });
   }
 
-  static processStatusNotifierJobs<Input, Output, Meta, ProgressInfo>({
-    statusQueue,
-    concurrency,
-    getQueue,
-    logger = defaultLogger,
-    redisConnection = defaultRedisConnection,
-  }: {
-    statusQueue: string,
-    concurrency: number,
-    getQueue: (queue: string) => BullMqJobQueue<Input, Output, Meta, ProgressInfo>,
-    logger: Logger,
-    redisConnection: () => Redis,
-  }) {
-    logger.info({ queue: statusQueue }, 'status notifier: start');
-    const worker = new BullWorker<StatusNotifierJobData>(
-      statusQueue,
-      async (job) => {
+  processStatusNotifierJobs() {
+    this.opts.logger.info({ queue: this.opts.statusNotifierQueueName }, 'status notifier: start');
+    const worker = new BullWorker(
+      this.opts.statusNotifierQueueName,
+      async () => {
         try {
-          const { queue } = job.data;
-          await getQueue(queue).notifyStatusListeners();
+          await this.notifyStatusListeners();
         } catch (err) {
-          logger.error({ err, queue: statusQueue }, 'status notifier: error');
+          this.opts.logger.error({
+            err,
+            queue: this.opts.statusNotifierQueueName
+          }, 'status notifier: error');
           throw err;
         }
       },
       {
-        connection: redisConnection(),
-        concurrency,
+        connection: this.opts.redisConnection(),
+        concurrency: 1,
       }
     );
     worker.on('error', (err) => {
-      logger.error({ err, queue: statusQueue }, 'status notifier: unhandled error');
+      this.opts.logger.error({
+        err,
+        queue: this.opts.statusNotifierQueueName
+      }, 'status notifier: unhandled error');
     });
   }
 

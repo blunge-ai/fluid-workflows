@@ -53,4 +53,5 @@ export interface JobQueue<Input, Output, Meta, ProgressInfo> {
   }): Promise<{ interrupt: boolean }>;
   updateJob(job: Pick<Job<Input, unknown>, 'uniqueId' | 'input'>): Promise<void>;
   completeJob(opts: { token: string, uniqueId: string, result: JobResult<Output> }): Promise<void>;
+  startMaintenanceWorkers(): Promise<void>;
 }
