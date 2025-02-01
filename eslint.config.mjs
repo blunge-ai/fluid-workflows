@@ -11,6 +11,9 @@ export default tseslint.config(
       eslint.configs.recommended,
       ...tseslint.configs.recommendedTypeChecked
     ],
+    rules: {
+      '@typescript-eslint/require-await': 'off',
+    },
     languageOptions: {
       parserOptions: {
         project: "./tsconfig.json",

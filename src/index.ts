@@ -1,5 +1,6 @@
 export {
  Workflow,
+ RunnableWorkflow,
 } from './Workflow';
 export type {
  WorkflowOptions,
@@ -9,7 +10,7 @@ export type {
 } from './Workflow';
 export {
  InMemoryWorkflowRunner
-} from './WorkflowRunner';
-export type {
- WorkflowRunner,
-} from './WorkflowRunner';
+} from './InMemoryWorkflowRunner';
+export {
+ JobQueueWorkflowRunner
+} from './JobQueueWorkflowRunner';

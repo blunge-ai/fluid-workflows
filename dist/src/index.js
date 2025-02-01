@@ -1,2 +1,2 @@
-export { Workflow, } from './Workflow';
-export { InMemoryWorkflowRunner } from './WorkflowRunner';
+export { Workflow, RunnableWorkflow, } from './Workflow';
+export { InMemoryWorkflowRunner } from './InMemoryWorkflowRunner';
