@@ -33,7 +33,7 @@ export class Workflow<Input, Output> {
     return new RunnableWorkflow<Input, Output>(this, input);
   }
 
-  run<NewOutput>(stepFn: StepFn<Output, NewOutput | RunnableWorkflow<unknown, NewOutput>>): Workflow<Input, NewOutput> {
+  step<NewOutput>(stepFn: StepFn<Output, NewOutput | RunnableWorkflow<unknown, NewOutput>>): Workflow<Input, NewOutput> {
     return new Workflow(this.opts, [...this.steps, stepFn as StepFn<unknown, unknown>]);
   }
 }

@@ -89,6 +89,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     this.name = opts.queueName;
     this.redis = this.opts.redisConnection();
     this.queue = bullQueue(this.opts.queueName, this.redis);
+    // TODO worker is not always necessary; lazy init?
     this.worker = bullWorker(
       this.opts.queueName,
       this.opts.redisConnection(),
@@ -206,12 +207,10 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
       }, `complete job: no such job, probably timed out`);
       return;
     }
-    if (job.data.outputKey != undefined) {
-      await this.redis.set(job.data.outputKey, pack(result), 'PX', this.opts.maximumWaitTimeoutMs);
-      result = { ...result, output: undefined } as JobResult<Output>;
-    }
+    await this.redis.set(job.data.outputKey, pack(result), 'PX', this.opts.maximumWaitTimeoutMs);
+    result = { ...result, output: undefined } as JobResult<Output>;
     if (result.type === 'error') {
-      this.opts.logger.warn({
+      this.opts.logger.info({
         uniqueId,
         queue: this.opts.queueName,
       }, 'complete job: completed with error status');
@@ -232,11 +231,6 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     this.opts.logger.info({ queue: this.opts.queueName }, 'adding status notifier job');
     void this.statusNotifierQueue.add('statusNotifier', undefined, {
       jobId: `${this.opts.statusNotifierQueueName}/${this.opts.queueName}`,
-      attempts: Number.MAX_SAFE_INTEGER,
-      backoff: {
-        type: 'fixed',
-        delay: 10000,
-      },
       repeat: {
         every: this.opts.statusNotifierRepeatMs,
       },
@@ -244,7 +238,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
       this.opts.logger.error({
         err,
         queue: this.opts.queueName
-      }, 'adding status notifier job: error adding job to queue');
+      }, 'adding status notifier job: error adding job to queue, waiting 5s before retrying');
       // retry after a while
       await timeout(5000);
       this.addStatusNotifierJob();
@@ -263,7 +257,6 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
             err,
             queue: this.opts.statusNotifierQueueName
           }, 'status notifier: error');
-          throw err;
         }
       },
       {
@@ -344,14 +337,14 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     const buffer = await this.redis.getdelBuffer(jobData.outputKey);
     void this.redis.del(jobData.inputKey);
     if (resultStatus == undefined) {
-      this.opts.logger.error({
+      this.opts.logger.warn({
         uniqueId: job.uniqueId,
         queue: this.opts.queueName,
       }, 'process job: job timed out');
       return { type: 'error' } satisfies JobResult<Output>;
     }
     if (!buffer) {
-      this.opts.logger.error({
+      this.opts.logger.warn({
         uniqueId: job.uniqueId,
         queue: this.opts.queueName,
         status: resultStatus,

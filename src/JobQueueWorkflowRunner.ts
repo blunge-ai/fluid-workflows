@@ -112,7 +112,7 @@ export class JobQueueWorkflowRunner {
             this.opts.logger.error({
               err,
               queue: this.queue.name
-            }, 'jobs worker: error in worker function');
+            }, 'jobs worker: exception occured when running workflow');
             await this.queue.completeJob({ token, uniqueId, result: { type: 'error' } });
             continue;
           }
@@ -122,7 +122,7 @@ export class JobQueueWorkflowRunner {
         this.opts.logger.error({
           err,
           queue: this.queue.name
-        }, 'jobs worker: error while running worker loop; sleeping 1s and retrying');
+        }, 'jobs worker: exception occured while running worker loop; sleeping 1s before continuing');
         await timeout(1000);
         continue;
       }

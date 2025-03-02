@@ -7,7 +7,7 @@ test('run', async () => {
 
   const workflow = Workflow
     .create<{ a: number, b: number }>({ name: 'add-a-and-b', version: 1 })
-    .run<{ c: number }>(async ({ a, b }) => {
+    .step<{ c: number }>(async ({ a, b }) => {
       return { c: a + b };
     });
 
@@ -21,16 +21,16 @@ test('run child workflow', async () => {
 
   const child = Workflow
     .create<{ childInput: string }>({ name: 'child-workflow', version: 1 })
-    .run(async ({ childInput }) => {
+    .step(async ({ childInput }) => {
       return { childOutput: `child(${childInput})` };
     });
 
   const workflow = Workflow
     .create<{ inputString: string }>({ name: 'add-a-and-b', version: 1 })
-    .run(async ({ inputString }) => {
+    .step(async ({ inputString }) => {
       return child.input({ childInput: `input(${inputString})` });;
     })
-    .run(async ({ childOutput }) => {
+    .step(async ({ childOutput }) => {
       return { result: `output(${childOutput})` };
     });
 

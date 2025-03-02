@@ -44,6 +44,7 @@ export type Job<Input, Meta = unknown> = {
 
 export interface JobQueue<Input, Output, Meta, ProgressInfo> {
   name: string,
+  enqueueJob(job: Job<Input, Meta>): Promise<unknown>;
   processJob(job: Job<Input, Meta>): Promise<JobResult<Output>>;
   getNextJob(opts: { token: string; block?: boolean }): Promise<Job<Input, Meta> | undefined>;
   updateStatus(opts: {
