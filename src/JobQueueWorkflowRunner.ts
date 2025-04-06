@@ -9,7 +9,7 @@ export type Opts = {
 
 export type ConstructorOpts = Partial<Opts>;
 
-type WorkflowJobData<Input> = {
+export type WorkflowJobData<Input = unknown> = {
   name: string,
   version: number,
   totalSteps: number,
@@ -17,7 +17,7 @@ type WorkflowJobData<Input> = {
   input: Input,
 };
 
-type WorkflowProgressInfo = {
+export type WorkflowProgressInfo = {
   phase: string,
   progress: number,
 };
@@ -42,7 +42,7 @@ export class JobQueueWorkflowRunner {
 
   constructor(
     private queue: JobQueue<WorkflowJobData<unknown>, unknown, unknown, unknown>,
-    opts: ConstructorOpts
+    opts?: ConstructorOpts
   ) {
     this.opts = {
       logger: defaultLogger,
@@ -57,7 +57,7 @@ export class JobQueueWorkflowRunner {
   ) {
     let stepIndex = job.input.step;
     const steps = workflow.steps.slice(stepIndex);
-    let result: unknown = job.input;
+    let result: unknown = job.input.input;
 
     const runOptions = {
       progress: async (phase: string, progress: number) => {
@@ -80,6 +80,9 @@ export class JobQueueWorkflowRunner {
 
     for (const step of steps) {
       result = await step(result, runOptions);
+      if (result instanceof RunnableWorkflow) {
+        //TODO
+      }
       stepIndex += 1;
       if (stepIndex !== workflow.steps.length) {
         const newInput = { ...job.input, input: result as Input, step: stepIndex } satisfies WorkflowJobData<Input>;
@@ -90,51 +93,57 @@ export class JobQueueWorkflowRunner {
   }
 
   async startWorkerProcess<Input, Output>(workflows: Workflow<Input, Output>[]) {
-    const token = uuidv4();
     let stop = false;
-    process.on('SIGTERM', () => {
-      this.opts.logger.warn({
-        queue: this.queue.name,
-      }, 'jobs worker: sigterm received; trying to stop gracefully');
-      stop = true;
-    });
-    this.opts.logger.info({ queue: this.queue.name }, `jobs worker: started`);
-    while (!stop) {
-      try {
-        const job = await this.queue.getNextJob({ token, block: true });
-        if (job) {
-          const { uniqueId } = job;
-          let output;
-          try {
-            const workflow = findWorkflow(workflows, job.input);
-            output = await this.runSteps(workflow, job, token);
-          } catch (err) { 
-            this.opts.logger.error({
-              err,
-              queue: this.queue.name
-            }, 'jobs worker: exception occured when running workflow');
-            await this.queue.completeJob({ token, uniqueId, result: { type: 'error' } });
-            continue;
+    const token = uuidv4();
+    const workerPromise = (async () => {
+      process.on('SIGTERM', () => {
+        this.opts.logger.warn({
+          queue: this.queue.name,
+        }, 'jobs worker: sigterm received; trying to stop gracefully');
+        stop = true;
+      });
+      this.opts.logger.info({ queue: this.queue.name }, `jobs worker: started`);
+      while (!stop) {
+        try {
+          const job = await this.queue.getNextJob({ token, block: true });
+          if (job) {
+            const { uniqueId } = job;
+            let output;
+            try {
+              const workflow = findWorkflow(workflows, job.input);
+              output = await this.runSteps(workflow, job, token);
+            } catch (err) {
+              this.opts.logger.error({
+                err,
+                queue: this.queue.name
+              }, 'jobs worker: exception occured when running workflow');
+              await this.queue.completeJob({ token, uniqueId, result: { type: 'error' } });
+              continue;
+            }
+            await this.queue.completeJob({ token, uniqueId, result: { type: 'success', output: output } });
           }
-          await this.queue.completeJob({ token, uniqueId, result: { type: 'success', output: output } });
+        } catch (err) {
+          this.opts.logger.error({
+            err,
+            queue: this.queue.name
+          }, 'jobs worker: exception occured while running worker loop; sleeping 1s before continuing');
+          await timeout(1000);
+          continue;
         }
-      } catch (err) {
-        this.opts.logger.error({
-          err,
-          queue: this.queue.name
-        }, 'jobs worker: exception occured while running worker loop; sleeping 1s before continuing');
-        await timeout(1000);
-        continue;
       }
-    }
-    this.opts.logger.info({ queue: this.queue.name }, `jobs worker: stopped`);
+      this.opts.logger.info({ queue: this.queue.name }, `jobs worker: stopped`);
+    })();
+    return async () => {
+      stop = true;
+      await workerPromise;
+    };
   }
 
   async run<Input, Output>(
     runnableWorkflow: RunnableWorkflow<Input, Output>,
-    { uniqueId }: { uniqueId?: string},
+    opts?: { uniqueId?: string},
   ) {
-    uniqueId ??= uuidv4();
+    const uniqueId = opts?.uniqueId ?? uuidv4();
     const input = {
       name: runnableWorkflow.workflow.opts.name,
       version: runnableWorkflow.workflow.opts.version,
@@ -142,10 +151,15 @@ export class JobQueueWorkflowRunner {
       step: 0,
       input: runnableWorkflow.input,
     } satisfies WorkflowJobData<Input>;
-    return await this.queue.processJob({
+    const result = await this.queue.processJob({
       uniqueId,
       meta: undefined,
       input,
     });
+    if (result.type !== 'success') {
+      this.opts.logger.error({ resulType: result.type, queue: this.queue.name }, 'run: job unsuccessful');
+      throw Error('job unsuccessful');
+    }
+    return result.output as Output;
   }
 }

@@ -83,7 +83,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
       concurrency: 1,
       fallback: false,
       logger: defaultLogger,
-      maximumWaitTimeoutMs: 60*60*24*1000,
+      maximumWaitTimeoutMs: 60*60*24*365*1000,
       ...opts,
     };
     this.name = opts.queueName;

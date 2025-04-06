@@ -29,7 +29,7 @@ export class Workflow<Input, Output> {
     return new Workflow<Input, Input>(opts, []);
   }
 
-  input(input: Input) {
+  withInput(input: Input) {
     return new RunnableWorkflow<Input, Output>(this, input);
   }
 
