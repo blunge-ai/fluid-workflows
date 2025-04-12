@@ -3,7 +3,7 @@ export {
  RunnableWorkflow,
 } from './Workflow';
 export type {
- WorkflowOptions,
+ WorkflowProps as WorkflowOptions,
  WorkflowRunOptions,
  ProgressFn,
  StepFn,

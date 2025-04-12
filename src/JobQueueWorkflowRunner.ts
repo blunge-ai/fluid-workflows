@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Workflow, RunnableWorkflow, WorkflowRunOptions } from './Workflow';
 import type { JobQueue, Job } from './JobQueue';
 import { timeout, Logger, defaultLogger } from './utils';
+import { WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
 
 export type Opts = {
   logger: Logger,
@@ -9,39 +10,12 @@ export type Opts = {
 
 export type ConstructorOpts = Partial<Opts>;
 
-export type WorkflowJobData<Input = unknown> = {
-  name: string,
-  version: number,
-  totalSteps: number,
-  step: number,
-  input: Input,
-};
-
-export type WorkflowProgressInfo = {
-  phase: string,
-  progress: number,
-};
-
-function findWorkflow<Input, Output>(workflows: Workflow<Input, Output>[], jobData: WorkflowJobData<Input>) {
-  const { name, version, totalSteps, step } = jobData;
-  if (step >= totalSteps) {
-    throw Error(`inconsistent jobData: ${JSON.stringify(jobData)}`);
-  }
-  const workflow = workflows.find((w) => w.opts.name === name && w.opts.version === version);
-  if (!workflow) {
-    throw Error(`no workflow found for '${name}' version ${version}`);
-  }
-  if (workflow.steps.length !== totalSteps) {
-    throw Error(`job totalSteps mismatch: expected ${workflow.steps.length}, received ${totalSteps}`);
-  }
-  return workflow;
-}
-
 export class JobQueueWorkflowRunner {
   private opts: Opts;
 
   constructor(
     private queue: JobQueue<WorkflowJobData<unknown>, unknown, unknown, unknown>,
+    private workflows: Workflow<unknown, unknown>[],
     opts?: ConstructorOpts
   ) {
     this.opts = {
@@ -62,8 +36,8 @@ export class JobQueueWorkflowRunner {
     const runOptions = {
       progress: async (phase: string, progress: number) => {
         this.opts.logger.info({
-          workflowName: workflow.opts.name,
-          workflowVersion: workflow.opts.version,
+          workflowName: workflow.name,
+          workflowVersion: workflow.version,
           phase,
           progress
         }, 'run steps: progress');
@@ -92,7 +66,23 @@ export class JobQueueWorkflowRunner {
     return result;
   }
 
-  async startWorkerProcess<Input, Output>(workflows: Workflow<Input, Output>[]) {
+
+  findWorkflow(jobData: WorkflowJobData) {
+    const { name, version, totalSteps, step } = jobData;
+    if (step >= totalSteps) {
+      throw Error(`inconsistent jobData: ${JSON.stringify(jobData)}`);
+    }
+    const workflow = this.workflows.find((w) => w.name === name && w.version === version);
+    if (!workflow) {
+      throw Error(`no workflow found for '${name}' version ${version}`);
+    }
+    if (workflow.steps.length !== totalSteps) {
+      throw Error(`job totalSteps mismatch: expected ${workflow.steps.length}, received ${totalSteps}`);
+    }
+    return workflow;
+  }
+
+  run() {
     let stop = false;
     const token = uuidv4();
     const workerPromise = (async () => {
@@ -110,7 +100,7 @@ export class JobQueueWorkflowRunner {
             const { uniqueId } = job;
             let output;
             try {
-              const workflow = findWorkflow(workflows, job.input);
+              const workflow = this.findWorkflow(job.input);
               output = await this.runSteps(workflow, job, token);
             } catch (err) {
               this.opts.logger.error({
@@ -137,29 +127,5 @@ export class JobQueueWorkflowRunner {
       stop = true;
       await workerPromise;
     };
-  }
-
-  async run<Input, Output>(
-    runnableWorkflow: RunnableWorkflow<Input, Output>,
-    opts?: { uniqueId?: string},
-  ) {
-    const uniqueId = opts?.uniqueId ?? uuidv4();
-    const input = {
-      name: runnableWorkflow.workflow.opts.name,
-      version: runnableWorkflow.workflow.opts.version,
-      totalSteps: runnableWorkflow.workflow.steps.length,
-      step: 0,
-      input: runnableWorkflow.input,
-    } satisfies WorkflowJobData<Input>;
-    const result = await this.queue.processJob({
-      uniqueId,
-      meta: undefined,
-      input,
-    });
-    if (result.type !== 'success') {
-      this.opts.logger.error({ resulType: result.type, queue: this.queue.name }, 'run: job unsuccessful');
-      throw Error('job unsuccessful');
-    }
-    return result.output as Output;
   }
 }

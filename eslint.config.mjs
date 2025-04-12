@@ -12,7 +12,8 @@ export default tseslint.config(
       ...tseslint.configs.recommendedTypeChecked
     ],
     rules: {
-      '@typescript-eslint/require-await': 'off',
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/no-unused-vars": "off",
     },
     languageOptions: {
       parserOptions: {

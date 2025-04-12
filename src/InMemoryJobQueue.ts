@@ -1,47 +1,59 @@
 import { JobQueue, Job, JobResult, JobStatus, JobActiveStatus } from './JobQueue';
+import { v4 as uuidv4 } from 'uuid';
 
-type InternalJobData<Input, Output, Meta, ProgressInfo> = {
+type InternalJobData<Input, Meta, ProgressInfo> = {
   job: Job<Input, Meta>,
-  resolve: (result: JobResult<Output>) => void,
+  outputKey: string,
   status: JobStatus<Meta, ProgressInfo>
 };
 
 export class InMemoryJobQueue<Input = unknown, Output = unknown, Meta = unknown, ProgressInfo = unknown> implements JobQueue<Input, Output, Meta, ProgressInfo> {
-  private queue: InternalJobData<Input, Output, Meta, ProgressInfo>[] = [];
-  private inProgress: InternalJobData<Input, Output, Meta, ProgressInfo>[] = [];
-  private getters: ((jobData: InternalJobData<Input, Output, Meta, ProgressInfo>) => void)[] = [];
+  private queue: InternalJobData<Input, Meta, ProgressInfo>[] = [];
+  private inProgress: InternalJobData<Input, Meta, ProgressInfo>[] = [];
+  private subscriptions: Record<string, (status: JobStatus<Meta, ProgressInfo>) => void> = {};
+  private getters: ((jobData: InternalJobData<Input, Meta, ProgressInfo> | undefined) => void)[] = [];
+  private results: Record<string, JobResult<Output>> = {};
 
   constructor(
     public name: string
   ) {}
 
-  async _enqueueJob(job: Job<Input, Meta>) {
-    return await new Promise<JobResult<Output>>((resolve) => {
-      const jobData = {
-        job,
-        resolve,
-        status: {
-          type: 'queued',
-          uniqueId: job.uniqueId,
-          meta: job.meta,
-          info: { waiting: this.queue.length },
-        }
-      } satisfies InternalJobData<Input, Output, Meta, ProgressInfo>;
-      const queuedGetter = this.getters.shift();
-      if (queuedGetter) {
-        queuedGetter(jobData);
-      } else {
-        this.queue.push(jobData);
+  async enqueueJob(job: Job<Input, Meta>) {
+    const jobData = {
+      job,
+      outputKey: uuidv4(),
+      status: {
+        type: 'queued',
+        uniqueId: job.uniqueId,
+        meta: job.meta,
+        info: { waiting: this.queue.length },
       }
-    });
+    } satisfies InternalJobData<Input, Meta, ProgressInfo>;
+    const queuedGetter = this.getters.shift();
+    if (queuedGetter) {
+      queuedGetter(jobData);
+    } else {
+      this.queue.push(jobData);
+    }
+    return { outputKey: jobData.outputKey };
   }
 
-  async enqueueJob(job: Job<Input, Meta>): Promise<void> {
-    await this._enqueueJob(job);
+  async getResult({ uniqueId, outputKey }: { uniqueId: string, outputKey: string }) {
+    const result = this.results[outputKey];
+    if (!result) {
+      throw Error('no result');
+    }
+    return result;
   }
 
-  async processJob(job: Job<Input, Meta>): Promise<JobResult<Output>> {
-    return await this._enqueueJob(job);
+  async subscribe(uniqueId: string, statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void) {
+    if (this.subscriptions[uniqueId]) {
+      throw Error('multiple subscriptions not implemented');
+    }
+    this.subscriptions[uniqueId] = statusHandler;
+    return async () => {
+      delete this.subscriptions[uniqueId];
+    };
   }
 
   async getNextJob(opts: { token: string; block?: boolean }): Promise<Job<Input, Meta> | undefined> {
@@ -50,12 +62,23 @@ export class InMemoryJobQueue<Input = unknown, Output = unknown, Meta = unknown,
       if (!opts.block) {
         return undefined;
       }
-      next = await new Promise<InternalJobData<Input, Output, Meta, ProgressInfo>>((resolve) => {
+      next = await new Promise<InternalJobData<Input, Meta, ProgressInfo> | undefined>((resolve) => {
         this.getters.push(resolve);
       });
+      if (!next) {
+        return undefined;
+      }
     }
     this.inProgress.push(next);
     return next.job;
+  }
+
+  releaseBlockedCalls() {
+    const getters = this.getters;
+    this.getters = [];
+    for (const getter of getters) {
+      void getter(undefined);
+    }
   }
 
   async updateStatus(opts: {
@@ -68,6 +91,12 @@ export class InMemoryJobQueue<Input = unknown, Output = unknown, Meta = unknown,
       return { interrupt: true };
     }
     jobData.status = { ...opts.status, meta: jobData.job.meta };
+    this.subscriptions[opts.status.uniqueId]?.({
+      uniqueId: opts.status.uniqueId,
+      type: opts.status.type,
+      meta: jobData.job.meta,
+      info: opts.status.info
+    });
     return { interrupt: false };
   }
 
@@ -85,7 +114,12 @@ export class InMemoryJobQueue<Input = unknown, Output = unknown, Meta = unknown,
       return;
     }
     this.inProgress = this.inProgress.filter((data) => data !== jobData);
-    jobData.resolve(opts.result);
+    this.results[jobData.outputKey] = opts.result;
+    this.subscriptions[opts.uniqueId]?.({
+      uniqueId: opts.uniqueId,
+      type: opts.result.type,
+      meta: jobData.job.meta
+    });
   }
   
 }

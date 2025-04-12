@@ -1,7 +1,8 @@
 
-export type WorkflowOptions = {
+export type WorkflowProps = {
   name: string,
   version: number,
+  numSteps: number,
 };
 
 export type WorkflowRunOptions = {
@@ -18,15 +19,22 @@ export class RunnableWorkflow<Input, Output> {
   ) {}
 }
 
-export class Workflow<Input, Output> {
+export class Workflow<Input, Output> implements WorkflowProps {
+  public name: string;
+  public version: number;
+  public numSteps: number;
 
   constructor(
-    public opts: WorkflowOptions,
+    props: Pick<WorkflowProps, 'name' | 'version'>,
     public steps: StepFn<unknown, unknown>[],
-  ) {}
+  ) {
+    this.name = props.name;
+    this.version = props.version;
+    this.numSteps = steps.length;
+  }
 
-  static create<Input>(opts: WorkflowOptions) {
-    return new Workflow<Input, Input>(opts, []);
+  static create<Input>(props: Pick<WorkflowProps, 'name' | 'version'>) {
+    return new Workflow<Input, Input>(props, []);
   }
 
   withInput(input: Input) {
@@ -34,6 +42,9 @@ export class Workflow<Input, Output> {
   }
 
   step<NewOutput>(stepFn: StepFn<Output, NewOutput | RunnableWorkflow<unknown, NewOutput>>): Workflow<Input, NewOutput> {
-    return new Workflow(this.opts, [...this.steps, stepFn as StepFn<unknown, unknown>]);
+    return new Workflow(
+      { name: this.name, version: this.version },
+      [ ...this.steps, stepFn as StepFn<unknown, unknown> ]
+    );
   }
 }

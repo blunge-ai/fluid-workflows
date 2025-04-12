@@ -1,11 +1,12 @@
 import { expect, test } from 'vitest'
 import { Workflow } from '~/Workflow';
 import { InMemoryJobQueue } from '~/InMemoryJobQueue';
-import { JobQueueWorkflowRunner, WorkflowJobData } from '~/JobQueueWorkflowRunner';
+import { WorkflowJobData } from '~/WorkflowJob';
+import type { JobQueue } from '~/JobQueue';
+import { JobQueueWorkflowRunner } from '~/JobQueueWorkflowRunner';
+import { JobQueueWorkflowDispatcher } from '~/JobQueueWorkflowDispatcher';
 
 test('run step', async () => {
-  const jobQueue = new InMemoryJobQueue<WorkflowJobData>('queue');
-  const runner = new JobQueueWorkflowRunner(jobQueue);
 
   const workflow = Workflow
     .create<{ a: number, b: number }>({ name: 'add-a-and-b', version: 1 })
@@ -13,15 +14,19 @@ test('run step', async () => {
       return { c: a + b };
     });
 
-  const stop = runner.startWorkerProcess([workflow]);
-  const result = await runner.run(workflow.withInput({ a: 12, b: 34 }));
-  await stop;
+  const jobQueue = new InMemoryJobQueue<WorkflowJobData>('queue');
+  const dispatcher = new JobQueueWorkflowDispatcher(<Input, Output>() => jobQueue as JobQueue<Input, Output, unknown, unknown>);
+  const runner = new JobQueueWorkflowRunner(jobQueue, [workflow]);
+
+  const stop = runner.run();
+  const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 12, b: 34 });
+  jobQueue.releaseBlockedCalls();
+  await stop();
+
   expect(result.c).toBe(46);
 });
 
 test('run child workflow', async () => {
-  const jobQueue = new InMemoryJobQueue<WorkflowJobData>('queue');
-  const runner = new JobQueueWorkflowRunner(jobQueue);
 
   const child = Workflow
     .create<{ childInput: string }>({ name: 'child-workflow', version: 1 })
@@ -38,8 +43,14 @@ test('run child workflow', async () => {
       return { output: `output(${childOutput})` };
     });
 
-  const stop = runner.startWorkerProcess([workflow]);
-  const result = await runner.run(workflow.withInput({ inputString: 'XX' }));
-  await stop;
+  const jobQueue = new InMemoryJobQueue<WorkflowJobData>('queue');
+  const dispatcher = new JobQueueWorkflowDispatcher(<Input, Output>() => jobQueue as JobQueue<Input, Output, unknown, unknown>);
+  const runner = new JobQueueWorkflowRunner(jobQueue, [workflow]);
+
+  const stop = runner.run();
+  const result = await dispatcher.dispatchAwaitingOutput(workflow, { inputString: 'XX' });
+  jobQueue.releaseBlockedCalls();
+  await stop();
+
   expect(result.output).toBe('output(child(input(XX)))');
 });

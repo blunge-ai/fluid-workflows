@@ -309,6 +309,9 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
       inputKey: `jobs:input:${dataKey}`,
       outputKey: `jobs:output:${dataKey}`,
     };
+    // TODO remove inputKey when job is finished
+    //void this.redis.del(jobData.inputKey);
+
     jobData.job = { ...job, input: undefined as Input };
     await this.redis.set(jobData.inputKey, pack(job.input), 'PX', this.opts.maximumWaitTimeoutMs);
     const [waiting] = await Promise.all([
@@ -323,44 +326,28 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
         info: { waiting }
       });
     }
-    return jobData;
+    return { outputKey: jobData.outputKey };
   }
 
-  async processJob(job: Job<Input, Meta>): Promise<JobResult<Output>> {
-    if (!this.opts.receiveResult || !this.opts.publishStatus) {
-      throw Error('need receiveResult and publishStatus queue options to receive an event when a job has completed');
-    }
-    const resultStatusPromise = this.opts.receiveResult(job, this.opts.maximumWaitTimeoutMs);
-    // TODO look up the job and connect to the existing job
-    const jobData = await this.enqueueJob(job);
-    const resultStatus = await resultStatusPromise;
-    const buffer = await this.redis.getdelBuffer(jobData.outputKey);
-    void this.redis.del(jobData.inputKey);
-    if (resultStatus == undefined) {
-      this.opts.logger.warn({
-        uniqueId: job.uniqueId,
-        queue: this.opts.queueName,
-      }, 'process job: job timed out');
-      return { type: 'error' } satisfies JobResult<Output>;
-    }
+  async getResult({ uniqueId, outputKey }: { uniqueId: string, outputKey: string }) {
+    const buffer = await this.redis.getdelBuffer(outputKey);
     if (!buffer) {
       this.opts.logger.warn({
-        uniqueId: job.uniqueId,
+        uniqueId,
         queue: this.opts.queueName,
-        status: resultStatus,
       }, 'process job: no result data, probably timed out');
       return { type: 'error' } satisfies JobResult<Output>;
     }
-    const result = unpack(buffer) as JobResult<Output>;
-    if (result.type !== resultStatus.type) {
-      this.opts.logger.error({
-        uniqueId: job.uniqueId,
-        queue: this.opts.queueName,
-        separatelyStoredResultStatus: result.type,
-        resultStatus,
-      }, 'process job: received result status does not match job result status');
-      return { type: 'error' } satisfies JobResult<Output>;
+    return unpack(buffer) as JobResult<Output>;
+  }
+
+  async subscribe(uniqueId: string, statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void) {
+    if (!this.opts.receiveResult || !this.opts.publishStatus) {
+      throw Error('need receiveResult and publishStatus queue options to receive an event when a job has completed');
     }
-    return result;
+    // TODO
+    return async () => {
+      
+    };
   }
 }
