@@ -1,7 +1,7 @@
 
 export type JobResultType = 'cancelled' | 'success' | 'error';
 export type JobStatusType = 'queued' | 'active' | JobResultType;
-export type QueuedStatusInfo = { waiting: number };
+export type WaitingStatusInfo = { waitingFor: number };
 
 export type JobResultStatus<Meta> = {
   type: JobResultType,
@@ -13,7 +13,7 @@ export type JobQueuedStatus<Meta> = {
   type: 'queued',
   uniqueId: string,
   meta: Meta,
-  info: QueuedStatusInfo,
+  info: WaitingStatusInfo
 };
 
 export type JobActiveStatus<Meta, ProgressInfo> = {
@@ -23,9 +23,17 @@ export type JobActiveStatus<Meta, ProgressInfo> = {
   info: ProgressInfo,
 };
 
+export type JobSleepingStatus<Meta> = {
+  type: 'sleeping',
+  uniqueId: string,
+  meta: Meta,
+  info: WaitingStatusInfo,
+};
+
 export type JobStatus<Meta, ProgressInfo>
   = JobQueuedStatus<Meta>
   | JobActiveStatus<Meta, ProgressInfo>
+  | JobSleepingStatus<Meta>
   | JobResultStatus<Meta>;
 
 export type JobResult<Output> = {
@@ -45,8 +53,9 @@ export type Job<Input, Meta = unknown> = {
 export interface JobQueue<Input, Output, Meta, ProgressInfo> {
   name: string,
   enqueueJob(job: Job<Input, Meta>): Promise<{ outputKey: string }>;
+  enqueueChildren(children: Job<Input, Meta>[], parentId: string): Promise<void>;
   subscribe(uniqueId: string, statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void): Promise<() => Promise<void>>;
-  getResult({ uniqueId, outputKey }: { uniqueId: string, outputKey: string }): Promise<JobResult<Output>>;
+  getResult(outputKey: string): Promise<JobResult<Output>>;
   getNextJob(opts: { token: string; block?: boolean }): Promise<Job<Input, Meta> | undefined>;
   updateStatus(opts: {
     token: string,
@@ -55,4 +64,5 @@ export interface JobQueue<Input, Output, Meta, ProgressInfo> {
   }): Promise<{ interrupt: boolean }>;
   updateJob(job: Pick<Job<Input, unknown>, 'uniqueId' | 'input'>): Promise<void>;
   completeJob(opts: { token: string, uniqueId: string, result: JobResult<Output> }): Promise<void>;
+  //TODO releaseBlockedCalls();
 }

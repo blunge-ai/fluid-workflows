@@ -16,6 +16,16 @@ export function timeout(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function assertNever(value?: never): never {
+  throw Error('reached unreachable code');
+}
+
+export function assert(condition: any, msg?: string): asserts condition {
+  if (!condition) {
+    throw new Error(msg);
+  }
+}
+
 export type Logger = {
   error: (data: Record<string, unknown>, message: string) => void,
   warn: (data: Record<string, unknown>, message: string) => void,

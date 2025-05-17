@@ -65,7 +65,7 @@ export class JobQueueWorkflowDispatcher {
       this.opts.logger.error({ resulType: resultStatus.type, queue: queue.name }, 'run: job unsuccessful');
       throw Error('job unsuccessful');
     }
-    const result = await queue.getResult({ uniqueId, outputKey });
+    const result = await queue.getResult(outputKey);
     return result.output as Output;
   }
 

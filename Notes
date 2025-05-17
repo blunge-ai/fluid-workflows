@@ -1,0 +1,8 @@
+
+// erroring or cancelling a job causes all descendants to be cancelled and all parents to be errored/cancelled
+// a child workflow returns a JobResult if disaptched, or just the workflow output, failing the parent if dispatchCheck is used
+// completing a job causes the parent to be woken if it is sleeping, if that was that last child it was waiting on
+
+meta should include workflow name and version, and other user defined properties
+
+

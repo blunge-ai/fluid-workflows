@@ -295,7 +295,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
             uniqueId,
             type: 'queued',
             meta: job.data.job.meta,
-            info: { waiting: index + subIndex },
+            info: { waitingFor: index + subIndex },
           });
         }
       }));
@@ -314,7 +314,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
 
     jobData.job = { ...job, input: undefined as Input };
     await this.redis.set(jobData.inputKey, pack(job.input), 'PX', this.opts.maximumWaitTimeoutMs);
-    const [waiting] = await Promise.all([
+    const [waitingFor] = await Promise.all([
       this.queue.getWaitingCount(),
       this.queue.add('job', jobData, { jobId: job.uniqueId })
     ]);
@@ -323,17 +323,22 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
         uniqueId: job.uniqueId,
         type: 'queued',
         meta: job.meta,
-        info: { waiting }
+        info: { waitingFor }
       });
     }
     return { outputKey: jobData.outputKey };
   }
 
-  async getResult({ uniqueId, outputKey }: { uniqueId: string, outputKey: string }) {
+  async enqueueChildren(children: Job<Input, Meta>[], parentId: string): Promise<void> {
+    //TODO
+    throw Error('not implemented')
+  }
+
+  async getResult(outputKey: string) {
     const buffer = await this.redis.getdelBuffer(outputKey);
     if (!buffer) {
       this.opts.logger.warn({
-        uniqueId,
+        outputKey: outputKey,
         queue: this.opts.queueName,
       }, 'process job: no result data, probably timed out');
       return { type: 'error' } satisfies JobResult<Output>;

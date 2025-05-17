@@ -11,7 +11,7 @@ test('run step', async () => {
       return { c: a + b };
     });
 
-  const result = await runner.run(workflow.withInput({ a: 12, b: 34 }));
+  const result = await runner.run(workflow, { a: 12, b: 34 });
 
   expect(result.c).toBe(46);
 });
@@ -27,14 +27,14 @@ test('run child workflow', async () => {
 
   const workflow = Workflow
     .create<{ inputString: string }>({ name: 'parent-workflow', version: 1 })
-    .step(async ({ inputString }) => {
-      return child.withInput({ childInput: `input(${inputString})` });;
+    .step(async ({ inputString }, { dispatch }) => {
+      return dispatch(child, { childInput: `input(${inputString})` });
     })
     .step(async ({ childOutput }) => {
       return { output: `output(${childOutput})` };
     });
 
-  const result = await runner.run(workflow.withInput({ inputString: 'XX' }));
+  const result = await runner.run(workflow, { inputString: 'XX' });
 
   expect(result.output).toBe('output(child(input(XX)))');
 });
