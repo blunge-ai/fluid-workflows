@@ -10,7 +10,7 @@ export type Opts = {
 
 export type ConstructorOpts = Partial<Opts>;
 
-export class JobQueueWorkflowDispatcher {
+export class WorkflowDispatcher {
   private opts: Opts;
 
   constructor(

@@ -4,11 +4,11 @@ import { InMemoryJobQueue } from '~/InMemoryJobQueue';
 import { WorkflowJobData } from '~/WorkflowJob';
 import type { JobQueue } from '~/JobQueue';
 import { JobQueueWorkflowRunner } from '~/JobQueueWorkflowRunner';
-import { JobQueueWorkflowDispatcher } from '~/JobQueueWorkflowDispatcher';
+import { WorkflowDispatcher } from '~/WorkflowDispatcher';
 
 function setup() {
   const queue = new InMemoryJobQueue<WorkflowJobData>('queue');
-  const dispatcher = new JobQueueWorkflowDispatcher(<Input, Output>() => queue as JobQueue<Input, Output, unknown, unknown>);
+  const dispatcher = new WorkflowDispatcher(<Input, Output>() => queue as JobQueue<Input, Output, unknown, unknown>);
   const runner = new JobQueueWorkflowRunner(queue);
   return { queue, dispatcher, runner };
 }
