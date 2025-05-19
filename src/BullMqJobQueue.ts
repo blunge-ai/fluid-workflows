@@ -4,13 +4,13 @@ import { Worker as BullWorker, Queue as BullQueue } from 'bullmq';
 import Redis from 'ioredis';
 import { pack, unpack } from './packer';
 
-import type { JobQueueEngine, JobData, JobStatus, JobResult, JobResultStatus, JobActiveStatus } from './JobQueue';
+import type { JobQueueEngine, JobData, JobStatus, JobResult, JobActiveStatus } from './JobQueue';
 import { defaultRedisConnection, timeout, Logger, defaultLogger } from './utils';
 
 const bullWorkerBlockingTimeoutSecs = 2;
 const fallbackDelayMs = 200;
 
-export type Opts<Meta, ProgressInfo> = {
+export type Opts = {
   queueName: string,
   attempts: number,
   lockTimeoutMs: number,
@@ -23,14 +23,11 @@ export type Opts<Meta, ProgressInfo> = {
   fallback: boolean,
   logger: Logger,
   maximumWaitTimeoutMs: number,
-
-  publishStatus?: (status: JobStatus<Meta, ProgressInfo>) => Promise<void>,
-  receiveResult?: (job: { uniqueId: string, meta: Meta }, timeoutMs: number) => Promise<JobResultStatus<Meta>>,
 };
 
-export type ConstructorOpts<Meta, ProgressInfo>
- = Partial<Opts<Meta, ProgressInfo>>
- & Pick<Opts<Meta, ProgressInfo>, 'queueName' | 'attempts' | 'lockTimeoutMs'>;
+export type ConstructorOpts
+ = Partial<Opts>
+ & Pick<Opts, 'queueName' | 'attempts' | 'lockTimeoutMs'>;
 
 type InternalJobData<Input, Meta> = {
   job: JobData<Input, Meta>,
@@ -65,16 +62,37 @@ export function bullWorker<Input, Output>(
   });
 }
 
-export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQueueEngine<Input, Output, Meta, ProgressInfo> {
+export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
   public name: string;
 
   private redis: Redis;
   private queue: BullQueue<InternalJobData<Input, Meta>, JobResult<Output>>;
-  private worker: BullWorker<InternalJobData<Input, Meta>, JobResult<Output>>;
   private statusNotifierQueue: BullQueue;
-  private opts: Opts<Meta, ProgressInfo>;
+  private opts: Opts;
 
-  constructor(opts: ConstructorOpts<Meta, ProgressInfo>) {
+  private _worker: BullWorker<InternalJobData<Input, Meta>, JobResult<Output>> | undefined = undefined;
+  private get worker() {
+    if (this._worker == undefined) {
+      this._worker = bullWorker(
+        this.opts.queueName,
+        this.opts.redisConnection(),
+        {
+          timeoutMs: this.opts.lockTimeoutMs,
+          blockingTimeoutSecs: bullWorkerBlockingTimeoutSecs,
+        }
+      );
+      this.startMaintenanceWorkers();
+    }
+    return this._worker;
+  }
+  
+  async startMaintenanceWorkers() {
+    void this.worker.startStalledCheckTimer();    
+    this.addStatusNotifierJob();
+    this.processStatusNotifierJobs();
+  }
+
+  constructor(opts: ConstructorOpts) {
     this.opts = {
       redisConnection: defaultRedisConnection,
       blockingTimeoutSecs: 8,
@@ -89,65 +107,36 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     this.name = opts.queueName;
     this.redis = this.opts.redisConnection();
     this.queue = bullQueue(this.opts.queueName, this.redis);
-    // TODO worker is not always necessary; lazy init?
-    this.worker = bullWorker(
-      this.opts.queueName,
-      this.opts.redisConnection(),
-      {
-        timeoutMs: this.opts.lockTimeoutMs,
-        blockingTimeoutSecs: bullWorkerBlockingTimeoutSecs,
-      }
-    );
     this.statusNotifierQueue = bullQueue(this.opts.statusNotifierQueueName, this.redis);
-    if (opts.publishStatus) {
-      this.addStatusNotifierJob();
-    }
-  }
-  
-  async startMaintenanceWorkers() {
-    void this.worker.startStalledCheckTimer();    
-    this.processStatusNotifierJobs();
   }
 
-  async updateJob(opts: {
+  async updateJob({ token, jobId, progressInfo, lockTimeoutMs, input }: {
     token: string,
-    status: Omit<JobActiveStatus<Meta, ProgressInfo>, 'meta'>,
+    jobId: string,
+    progressInfo?: ProgressInfo,
     lockTimeoutMs?: number,
     input?: Input,
   }): Promise<{ interrupt: boolean }> {
-    const { token, status, lockTimeoutMs, input } = opts;
-    const bullJob = await this.queue.getJob(status.uniqueId);
+    const bullJob = await this.queue.getJob(jobId);
     if (!bullJob) {
       this.opts.logger.error({
-        uniqueId: status.uniqueId,
+        jobId,
         queue: this.opts.queueName
       }, 'publish status: job not found');
       throw Error('update status: job not found');
     }
     void bullJob.extendLock(token, lockTimeoutMs ?? this.opts.lockTimeoutMs);
-    if (this.opts.publishStatus) {
-      const statusWithMeta = { ...status, meta: bullJob.data.job.meta } as JobStatus<Meta, ProgressInfo>;
-      void this.opts.publishStatus(statusWithMeta);
+    if (progressInfo != undefined) {
+      await this.publishStatus({
+        jobId,
+        type: 'active',
+        meta: bullJob.data.job.meta,
+        info: progressInfo,
+      });
     }
-    
-    // If input was provided, update it
     if (input !== undefined) {
-      await this._updateJobInput({ uniqueId: status.uniqueId, input });
+      await this.redis.set(bullJob.data.inputKey, pack(job.input), 'PX', this.opts.maximumWaitTimeoutMs);
     }
-    
-    return { interrupt: false };
-  }
-
-  private async _updateJobInput(job: Pick<JobData<Input, Meta>, 'uniqueId' | 'input'>) {
-    const bullJob = await this.queue.getJob(job.uniqueId);
-    if (!bullJob) {
-      this.opts.logger.error({
-        uniqueId: job.uniqueId,
-        queue: this.opts.queueName
-      }, 'update job: job not found');
-      throw Error('update job: job not found');
-    }
-    await this.redis.set(bullJob.data.inputKey, pack(job.input), 'PX', this.opts.maximumWaitTimeoutMs);
     return { interrupt: false };
   }
 
@@ -174,27 +163,33 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
         }
         continue;
       }
-
-      const uniqueId = bullJob.id;
-      if (uniqueId == undefined) {
+      const jobId = bullJob.id;
+      if (jobId == undefined) {
         this.opts.logger.error({
           queue: this.opts.queueName
         }, 'get next job: job has no id');
-        await bullJob.moveToCompleted({ type: 'error' }, token, false);
+        await bullJob.moveToCompleted({
+          type: 'error',
+          reason: 'get next job: job has no id'
+        }, token, false);
         continue;
       }
       let input: Input | undefined = bullJob.data.job.input;
       const buffer = await this.redis.getBuffer(bullJob.data.inputKey);
       if (!buffer) {
         this.opts.logger.warn({
-          uniqueId,
+          jobId,
           queue: this.opts.queueName,
         }, `get next job: missing job data, probably timed out`);
-        await this.completeJob({ token, uniqueId, result: { type: 'error' } });
+        await this.completeJob({
+          token,
+          jobId,
+          result: { type: 'error', reason: 'get next job: missing job data' }
+        });
         continue;
       }
       input = unpack(buffer) as Input;
-      this.opts.logger.info({ uniqueId, queue: this.opts.queueName }, `get next job: processing job`);
+      this.opts.logger.info({ jobId, queue: this.opts.queueName }, `get next job: processing job`);
       return { ...bullJob.data.job, input } satisfies JobData<Input, Meta>;
     }
     return undefined;
@@ -206,31 +201,48 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     result: JobResult<Output> 
   }): Promise<void> {
     const { token, result } = opts;
-    const uniqueId = opts.jobId;
-    const job = await this.queue.getJob(uniqueId);
+    const jobId = opts.jobId;
+    const job = await this.queue.getJob(jobId);
     if (!job) {
       this.opts.logger.warn({
-        uniqueId,
+        jobId,
         queue: this.opts.queueName
       }, `complete job: no such job, probably timed out`);
       return;
     }
-    await this.redis.set(job.data.outputKey, pack(result), 'PX', this.opts.maximumWaitTimeoutMs);
-    result = { ...result, output: undefined } as JobResult<Output>;
+    const resultWithoutOutput = {
+      ...result,
+      output: undefined
+    } as JobResult<Output | undefined>;
     if (result.type === 'error') {
       this.opts.logger.info({
-        uniqueId,
+        jobId,
         queue: this.opts.queueName,
-      }, 'complete job: completed with error status');
-      await job.moveToFailed(new Error('job completed with error status'), token, false);
-    } else {
-      await job.moveToCompleted(result, token, false);
-    }
-    if (this.opts.publishStatus) {
-      void this.opts.publishStatus({
-        uniqueId,
+        reason: result.reason,
+      }, 'complete job: completed with error');
+      await job.moveToFailed(new Error(`job completed with error: ${result.reason}`), token, false);
+      await this.publishStatus({
+        jobId,
         type: result.type,
-        meta: job.data.job.meta
+        meta: job.data.job.meta,
+        reason: result.reason,
+      });
+    } else if (result.type === 'cancelled') {
+      await job.moveToCompleted(resultWithoutOutput, token, false);
+      await this.publishStatus({
+        jobId,
+        type: result.type,
+        meta: job.data.job.meta,
+        reason: result.reason,
+      });
+    } else {
+      await this.redis.set(job.data.outputKey, pack(result), 'PX', this.opts.maximumWaitTimeoutMs);
+      await job.moveToCompleted(resultWithoutOutput, token, false);
+      await this.publishStatus({
+        jobId,
+        type: result.type,
+        meta: job.data.job.meta,
+        outputKey: job.data.outputKey,
       });
     }
   }
@@ -293,19 +305,20 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     for (let index = 0; index < waiting; index += batchSize) {
       const jobs = await this.queue.getWaiting(index, Math.min(index + batchSize, waiting));
       await Promise.all(jobs.map(async (job, subIndex) => {
-        const uniqueId = job.id;
-        if (!uniqueId) {
-          console.error('job has no id');
+        const jobId = job.id;
+        if (!jobId) {
+          this.opts.logger.warn({
+            queue: this.opts.queueName,
+            jobId
+          }, 'job has no id');
           return;
         }
-        if (this.opts.publishStatus) {
-          await this.opts.publishStatus({
-            uniqueId,
-            type: 'queued',
-            meta: job.data.job.meta,
-            info: { waitingFor: index + subIndex },
-          });
-        }
+        await this.publishStatus({
+          jobId,
+          type: 'queued',
+          meta: job.data.job.meta,
+          waiting: index + subIndex,
+        });
       }));
     }
   }
@@ -318,24 +331,41 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
       inputKey: `jobs:input:${dataKey}`,
       outputKey: `jobs:output:${dataKey}`,
     };
-    // TODO remove inputKey when job is finished
-    //void this.redis.del(jobData.inputKey);
-
     jobData.job = { ...job, input: undefined as Input };
     await this.redis.set(jobData.inputKey, pack(job.input), 'PX', this.opts.maximumWaitTimeoutMs);
-    const [waitingFor] = await Promise.all([
+    const [waiting] = await Promise.all([
       this.queue.getWaitingCount(),
-      this.queue.add('job', jobData, { jobId: job.uniqueId })
+      this.queue.add('job', jobData, { jobId: job.id })
     ]);
-    if (this.opts.publishStatus) {
-      void this.opts.publishStatus({
-        uniqueId: job.uniqueId,
-        type: 'queued',
-        meta: job.meta,
-        info: { waitingFor }
-      });
-    }
+    await this.publishStatus({
+      jobId: job.id,
+      type: 'queued',
+      meta: job.meta,
+      waiting,
+    });
   }
+
+  async getJobResult(opts: { outputKey: string, delete?: boolean }): Promise<JobResult<Output>> {
+    const outputKey = opts.outputKey;
+    const buffer = (
+      opts.delete
+        ? await this.redis.getdelBuffer(outputKey)
+        : await this.redis.getBuffer(outputKey)
+    );
+    if (!buffer) {
+      this.opts.logger.warn({
+        outputKey: outputKey,
+        queue: this.opts.queueName,
+      }, 'process job: no result data, probably timed out');
+      return { type: 'error', reason: 'process job: no result data' } satisfies JobResult<Output>;
+    }
+    return unpack(buffer) as JobResult<Output>;
+  }
+
+}
+
+// can you please add the missing functions from JobQueueEngine to this class ai!
+class BullMqJobQueueEngine implements JobQueueEngine<Input, Output, Meta, ProgressInfo> {
 
   async submitChildrenSuspendParent(opts: { 
     children: { data: JobData<Input, Meta>, queue: string }[], 
@@ -345,23 +375,11 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     throw Error('not implemented')
   }
 
-  async getJobResult(opts: { outputKey: string, delete?: boolean }): Promise<JobResult<Output>> {
-    const outputKey = opts.outputKey;
-    const buffer = await this.redis.getdelBuffer(outputKey);
-    if (!buffer) {
-      this.opts.logger.warn({
-        outputKey: outputKey,
-        queue: this.opts.queueName,
-      }, 'process job: no result data, probably timed out');
-      return { type: 'error' } satisfies JobResult<Output>;
-    }
-    return unpack(buffer) as JobResult<Output>;
+  async publishStatus<Meta, ProgressInfo>(status: JobStatus<Meta, ProgressInfo>) {
+    //TODO
   }
 
   async subscribeToJobStatus(jobId: string, statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void): Promise<() => Promise<void>> {
-    if (!this.opts.receiveResult || !this.opts.publishStatus) {
-      throw Error('need receiveResult and publishStatus queue options to receive an event when a job has completed');
-    }
     // TODO
     return async () => {
       // Unsubscribe logic
