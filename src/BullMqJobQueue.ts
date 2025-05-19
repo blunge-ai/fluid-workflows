@@ -4,7 +4,7 @@ import { Worker as BullWorker, Queue as BullQueue } from 'bullmq';
 import Redis from 'ioredis';
 import { pack, unpack } from './packer';
 
-import type { JobQueue, Job, JobStatus, JobResult, JobResultStatus, JobActiveStatus } from './JobQueue';
+import type { JobQueueEngine, JobData, JobStatus, JobResult, JobResultStatus, JobActiveStatus } from './JobQueue';
 import { defaultRedisConnection, timeout, Logger, defaultLogger } from './utils';
 
 const bullWorkerBlockingTimeoutSecs = 2;
@@ -33,7 +33,7 @@ export type ConstructorOpts<Meta, ProgressInfo>
  & Pick<Opts<Meta, ProgressInfo>, 'queueName' | 'attempts' | 'lockTimeoutMs'>;
 
 type JobData<Input, Meta> = {
-  job: Job<Input, Meta>,
+  job: JobData<Input, Meta>,
   inputKey: string,
   outputKey: string,
 };
@@ -65,7 +65,8 @@ export function bullWorker<Input, Output>(
   });
 }
 
-export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQueue<Input, Output, Meta, ProgressInfo> {
+// Refator this class to implement JobQueueEngine ai!
+export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQueueEngine<Input, Output, Meta, ProgressInfo> {
   public name: string;
 
   private redis: Redis;
@@ -134,7 +135,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     return { interrupt: false };
   }
 
-  async updateJob(job: Pick<Job<Input, Meta>, 'uniqueId' | 'input'>) {
+  async updateJob(job: Pick<JobData<Input, Meta>, 'uniqueId' | 'input'>) {
     const bullJob = await this.queue.getJob(job.uniqueId);
     if (!bullJob) {
       this.opts.logger.error({
@@ -189,7 +190,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
       }
       input = unpack(buffer) as Input;
       this.opts.logger.info({ uniqueId, queue: this.opts.queueName }, `get next job: processing job`);
-      return { ...bullJob.data.job, input } satisfies Job<Input, Meta>;
+      return { ...bullJob.data.job, input } satisfies JobData<Input, Meta>;
     }
     return undefined;
   }
@@ -302,7 +303,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     }
   }
 
-  async enqueueJob(job: Job<Input, Meta>) {
+  async enqueueJob(job: JobData<Input, Meta>) {
     const dataKey = uuidv4();
     const jobData: JobData<Input, Meta> = {
       job,
@@ -329,7 +330,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     return { outputKey: jobData.outputKey };
   }
 
-  async enqueueChildren(children: Job<Input, Meta>[], parentId: string): Promise<void> {
+  async enqueueChildren(children: JobData<Input, Meta>[], parentId: string): Promise<void> {
     //TODO
     throw Error('not implemented')
   }
