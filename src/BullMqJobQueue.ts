@@ -32,7 +32,7 @@ export type ConstructorOpts<Meta, ProgressInfo>
  = Partial<Opts<Meta, ProgressInfo>>
  & Pick<Opts<Meta, ProgressInfo>, 'queueName' | 'attempts' | 'lockTimeoutMs'>;
 
-type JobData<Input, Meta> = {
+type InternalJobData<Input, Meta> = {
   job: JobData<Input, Meta>,
   inputKey: string,
   outputKey: string,
@@ -65,13 +65,12 @@ export function bullWorker<Input, Output>(
   });
 }
 
-// Refator this class to implement JobQueueEngine ai!
 export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQueueEngine<Input, Output, Meta, ProgressInfo> {
   public name: string;
 
   private redis: Redis;
-  private queue: BullQueue<JobData<Input, Meta>, JobResult<Output>>;
-  private worker: BullWorker<JobData<Input, Meta>, JobResult<Output>>;
+  private queue: BullQueue<InternalJobData<Input, Meta>, JobResult<Output>>;
+  private worker: BullWorker<InternalJobData<Input, Meta>, JobResult<Output>>;
   private statusNotifierQueue: BullQueue;
   private opts: Opts<Meta, ProgressInfo>;
 
@@ -110,15 +109,13 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     this.processStatusNotifierJobs();
   }
 
-  async updateStatus({
-    token,
-    status,
-    lockTimeoutMs
-  }: {
+  async updateJob(opts: {
     token: string,
     status: Omit<JobActiveStatus<Meta, ProgressInfo>, 'meta'>,
     lockTimeoutMs?: number,
-  }) {
+    input?: Input,
+  }): Promise<{ interrupt: boolean }> {
+    const { token, status, lockTimeoutMs, input } = opts;
     const bullJob = await this.queue.getJob(status.uniqueId);
     if (!bullJob) {
       this.opts.logger.error({
@@ -132,10 +129,16 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
       const statusWithMeta = { ...status, meta: bullJob.data.job.meta } as JobStatus<Meta, ProgressInfo>;
       void this.opts.publishStatus(statusWithMeta);
     }
+    
+    // If input was provided, update it
+    if (input !== undefined) {
+      await this._updateJobInput({ uniqueId: status.uniqueId, input });
+    }
+    
     return { interrupt: false };
   }
 
-  async updateJob(job: Pick<JobData<Input, Meta>, 'uniqueId' | 'input'>) {
+  private async _updateJobInput(job: Pick<JobData<Input, Meta>, 'uniqueId' | 'input'>) {
     const bullJob = await this.queue.getJob(job.uniqueId);
     if (!bullJob) {
       this.opts.logger.error({
@@ -145,9 +148,11 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
       throw Error('update job: job not found');
     }
     await this.redis.set(bullJob.data.inputKey, pack(job.input), 'PX', this.opts.maximumWaitTimeoutMs);
+    return { interrupt: false };
   }
 
-  async getNextJob({ token, block }: { token: string; block?: boolean }) {
+  async acquireJob(opts: { token: string, block?: boolean }): Promise<JobData<Input, Meta> | undefined> {
+    const { token, block } = opts;
     const start = Date.now();
     while (true) {
       const elapsedMs = Date.now() - start;
@@ -195,11 +200,13 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     return undefined;
   }
 
-  async completeJob({ token, uniqueId, result }: {
-    token: string,
-    uniqueId: string,
-    result: JobResult<Output>,
-  }) {
+  async completeJob(opts: { 
+    token: string, 
+    jobId: string, 
+    result: JobResult<Output> 
+  }): Promise<void> {
+    const { token, result } = opts;
+    const uniqueId = opts.jobId;
     const job = await this.queue.getJob(uniqueId);
     if (!job) {
       this.opts.logger.warn({
@@ -303,9 +310,10 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     }
   }
 
-  async enqueueJob(job: JobData<Input, Meta>) {
+  async submitJob(opts: { data: JobData<Input, Meta>, queue: string }): Promise<void> {
+    const job = opts.data;
     const dataKey = uuidv4();
-    const jobData: JobData<Input, Meta> = {
+    const jobData: InternalJobData<Input, Meta> = {
       job,
       inputKey: `jobs:input:${dataKey}`,
       outputKey: `jobs:output:${dataKey}`,
@@ -327,15 +335,18 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
         info: { waitingFor }
       });
     }
-    return { outputKey: jobData.outputKey };
   }
 
-  async enqueueChildren(children: JobData<Input, Meta>[], parentId: string): Promise<void> {
+  async submitChildrenSuspendParent(opts: { 
+    children: { data: JobData<Input, Meta>, queue: string }[], 
+    parentId: string 
+  }): Promise<void> {
     //TODO
     throw Error('not implemented')
   }
 
-  async getResult(outputKey: string) {
+  async getJobResult(opts: { outputKey: string, delete?: boolean }): Promise<JobResult<Output>> {
+    const outputKey = opts.outputKey;
     const buffer = await this.redis.getdelBuffer(outputKey);
     if (!buffer) {
       this.opts.logger.warn({
@@ -347,13 +358,13 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> implements JobQue
     return unpack(buffer) as JobResult<Output>;
   }
 
-  async subscribe(uniqueId: string, statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void) {
+  async subscribeToJobStatus(jobId: string, statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void): Promise<() => Promise<void>> {
     if (!this.opts.receiveResult || !this.opts.publishStatus) {
       throw Error('need receiveResult and publishStatus queue options to receive an event when a job has completed');
     }
     // TODO
     return async () => {
-      
+      // Unsubscribe logic
     };
   }
 }
