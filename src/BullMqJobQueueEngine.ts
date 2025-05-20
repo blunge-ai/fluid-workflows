@@ -104,18 +104,22 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
     return this._worker;
   }
   
+  _getBullQueue() {
+    return this.queue;
+  }
+
   async startMaintenanceWorkers() {
-    void this.worker.startStalledCheckTimer();    
+    void this.worker.startStalledCheckTimer();
     this.addStatusNotifierJob();
     this.processStatusNotifierJobs();
   }
 
-  constructor(opts: Opts & { queue: string }) {
+  constructor(opts: Opts & { queue: string, redis: Redis }) {
     this.opts = {
       statusNotifierQueue: `${opts.queue}/status-notifier`,
       ...opts,
     };
-    this.redis = this.opts.redisConnection();
+    this.redis = opts.redis;
     this.queue = bullQueue(this.opts.queue, this.redis);
     this.statusNotifierQueue = bullQueue(this.opts.statusNotifierQueue, this.redis);
   }
@@ -368,10 +372,6 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
   async publishStatus(status: JobStatus<Meta, ProgressInfo>): Promise<void> {
     await this.redis.publish(`jobs:status:${status.jobId}`, JSON.stringify(status));
   }
-
-  _getBullQueue() {
-    return this.queue;
-  }
 }
 
 export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements JobQueueEngine<Input, Output, Meta, ProgressInfo> {
@@ -399,7 +399,8 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     if (!this.queues[queue]) {
       this.queues[queue] = new BullMqJobQueue<Input, Output, Meta, ProgressInfo>({
         ...this.opts,
-        queue
+        queue,
+        redis: this.redis,
       });
     }
     return this.queues[queue];
