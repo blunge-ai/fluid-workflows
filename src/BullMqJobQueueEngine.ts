@@ -36,7 +36,7 @@ export type QueueOpts = Opts & {
 
 type InternalJobData<Input, Meta> = {
   job: JobData<Input, Meta>,
-  inputKey: string,
+  dataKey: string,
   resultKey: string,
   parentId?: string,
   childResultKeys?: Record<string, string>,
@@ -113,11 +113,11 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
     const dataKey = uuidv4();
     const jobData: InternalJobData<Input, Meta> = {
       job,
-      inputKey: `jobs:input:${dataKey}`,
-      resultKey: opts.resultKey ?? `jobs:output:${dataKey}`,
+      dataKey,
+      resultKey: opts.resultKey ?? dataKey,
     };
     jobData.job = { ...job, input: undefined as Input };
-    await this.redis.set(jobData.inputKey, pack(job.input), 'PX', this.opts.maximumWaitTimeoutMs);
+    await this.redis.set(`jobs:input:${jobData.dataKey}`, pack(job.input), 'PX', this.opts.maximumWaitTimeoutMs);
     let parent = undefined;
     if (opts.parentId) {
       assert(opts.parentQueue);
@@ -170,7 +170,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
         continue;
       }
       let input: Input | undefined = bullJob.data.job.input;
-      const buffer = await this.redis.getBuffer(bullJob.data.inputKey);
+      const buffer = await this.redis.getBuffer(`jobs:input:${bullJob.data.dataKey}`);
       if (!buffer) {
         this.opts.logger.warn({
           jobId,
@@ -215,7 +215,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
       });
     }
     if (input !== undefined) {
-      await this.redis.set(bullJob.data.inputKey, pack(input), 'PX', this.opts.maximumWaitTimeoutMs);
+      await this.redis.set(`jobs:input:${bullJob.data.dataKey}`, pack(input), 'PX', this.opts.maximumWaitTimeoutMs);
     }
     return { interrupt: false };
   }
@@ -239,7 +239,11 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
       ...result,
       output: undefined
     } as JobResult<Output | undefined>;
-    await this.redis.set(bullJob.data.resultKey, pack(result), 'PX', this.opts.maximumWaitTimeoutMs);
+    this.redis
+      .multi()
+      .set(`jobs:result:${bullJob.data.resultKey}`, pack(result), 'PX', this.opts.maximumWaitTimeoutMs)
+      .del(`jobs:input:${bullJob.data.dataKey}`)
+      .exec();
     if (result.type === 'error') {
       this.opts.logger.info({
         jobId,
@@ -349,8 +353,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
   }
 
   async publishStatus(status: JobStatus<Meta, ProgressInfo>): Promise<void> {
-    const statusKey = `jobs:status:${status.jobId}`;
-    await this.redis.publish(statusKey, JSON.stringify(status));
+    await this.redis.publish(`jobs:status:${status.jobId}`, JSON.stringify(status));
   }
 
   _getBullQueue() {
@@ -455,15 +458,14 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
   }
 
   async getJobResult(opts: { resultKey: string, delete?: boolean }): Promise<JobResult<Output>> {
-    const resultKey = opts.resultKey;
     const buffer = (
       opts.delete
-        ? await this.redis.getdelBuffer(resultKey)
-        : await this.redis.getBuffer(resultKey)
+        ? await this.redis.getdelBuffer(`jobs:result:${opts.resultKey}`)
+        : await this.redis.getBuffer(`jobs:result:${opts.resultKey}`)
     );
     if (!buffer) {
-      this.opts.logger.warn({
-        resultKey: resultKey,
+      this.opts.logger.error({
+        resultKey: opts.resultKey
       }, 'process job: no result data, probably timed out');
       return { type: 'error', reason: 'process job: no result data' } satisfies JobResult<Output>;
     }
@@ -474,7 +476,7 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     let request = this.redis.multi();
     const entries = Object.entries(childResultKeys);
     for (const [_childId, resultKey] of entries) {
-      request = request.getBuffer(resultKey);
+      request = request.getBuffer(`jobs:result:${resultKey}`);
     }
     const results = await request.exec();
     const resultMap = Object.fromEntries(
@@ -486,6 +488,7 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     return mapValues(resultMap, (buffer) => unpack(buffer!) as JobResult<Output>);
   }
 
+  // TODO separate getChildResults from submitChildrenSuspendParent
   async submitChildrenSuspendParent(opts: { 
     children: { data: JobData<Input, Meta>, queue: string }[], 
     token: string,
@@ -499,7 +502,7 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     }
 
     const childResultKeys = Object.fromEntries(
-      opts.children.map(({ data: { id } } ) => [id, `jobs:output:${opts.parentId}:${id}`])
+      opts.children.map(({ data: { id } } ) => [id, `${bullJob.data.dataKey}:child:${id}`])
     );
 
     if (bullJob.data.childResultKeys && isEqual(bullJob.data.childResultKeys, childResultKeys)) {
@@ -518,14 +521,16 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
       }, 'continue parent: parent job has existing childResultKeys but children are not running, retrying');
     }
 
-    await Promise.all(opts.children.map((child) => (
+    await Promise.all(opts.children.map((child) => {
+      const resultKey = childResultKeys[child.data.id];
+      assert(resultKey);
       this.submitJob({
         ...child,
         parentId: opts.parentId,
         parentQueue: opts.parentQueue,
-        resultKey: childResultKeys[child.data.id]
-      })
-    )));
+        resultKey,
+      });
+    }));
 
     await bullJob.updateData({
       ...bullJob.data,
@@ -536,7 +541,7 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     if (!shouldWait) {
       const childResults = await this.getChildResults(childResultKeys);
       if (!childResults) {
-        this.opts.logger.info({
+        this.opts.logger.error({
           parentId: opts.parentId,
           parentQueue: opts.parentQueue,
           childrenCount: opts.children.length
