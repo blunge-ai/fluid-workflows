@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Workflow, DispatchableWorkflow, DispatchOpts, WorkflowRunOptions } from './Workflow';
-import type { JobQueue, Job } from './JobQueue';
+import type { JobQueueEngine, JobData } from './JobQueueEngine';
 import { timeout, assertNever, Logger, defaultLogger } from './utils';
 import { WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
 
@@ -13,7 +13,7 @@ export type ConstructorOpts = Partial<Opts>;
 function findWorkflow(workflows: Workflow <unknown, unknown > [], jobData: WorkflowJobData) {
   const { name, version, totalSteps, step } = jobData;
   if (step >= totalSteps) {
-    throw Error(`inconsistent jobData: ${JSON.stringify(jobData)}`);
+    throw Error(`inconsistent jobData: ${step} >= ${totalSteps}`);
   }
   const workflow = workflows.find((w) => w.name === name && w.version === version);
   if (!workflow) {
@@ -29,7 +29,7 @@ export class JobQueueWorkflowRunner {
   private opts: Opts;
 
   constructor(
-    private queue: JobQueue<WorkflowJobData<unknown>, unknown, unknown, unknown>,
+    private engine: JobQueueEngine<WorkflowJobData<unknown>, unknown, unknown, unknown>,
     opts?: ConstructorOpts
   ) {
     this.opts = {
@@ -40,7 +40,8 @@ export class JobQueueWorkflowRunner {
 
   async runSteps<Input, Output>(
     workflow: Workflow<Input, Output>,
-    job: Job<WorkflowJobData<Input>>,
+    job: JobData<WorkflowJobData<Input>>,
+    queue: string,
     token: string,
   ): Promise<[Output | undefined, 'sleeping' | 'success']>{
     let stepIndex = job.input.step;
@@ -53,15 +54,15 @@ export class JobQueueWorkflowRunner {
           workflowName: workflow.name,
           workflowVersion: workflow.version,
           phase,
-          progress
+          progress,
+          queue,
+          jobId: job.id,
         }, 'run steps: progress');
-        return await this.queue.updateStatus({
+        return await this.engine.updateJob({
+          queue,
           token,
-          status: {
-            type: 'active' as const,
-            uniqueId: job.uniqueId,
-            info: { phase, progress } satisfies WorkflowProgressInfo
-          }
+          jobId: job.id,
+          progressInfo: { phase, progress } satisfies WorkflowProgressInfo
         })
       },
       dispatch: <Input, Output>(
@@ -75,66 +76,72 @@ export class JobQueueWorkflowRunner {
       result = await step(result, runOptions);
       if (result instanceof DispatchableWorkflow) {
         const childJob = {
-          uniqueId: result.opts?.uniqueId ?? uuidv4(),
+          id: result.opts?.jobId ?? uuidv4(),
           meta: undefined, //TODO
           input: result.input,
         };
-        //TODO dispatcher
-        this.queue.enqueueChildren([childJob], job.uniqueId);
-        return [undefined, 'sleeping'];
+        const childResults = await this.engine.submitChildrenSuspendParent({
+          token,
+          children: [{ data: childJob , queue }],
+          parentId: job.id,
+          parentQueue: queue
+        });
+        if (!childResults) {
+          return [undefined, 'sleeping'];
+        }
+        result = childResults[childJob.id];
       }
       stepIndex += 1;
       if (stepIndex !== workflow.steps.length) {
         const newInput = { ...job.input, input: result as Input, step: stepIndex } satisfies WorkflowJobData<Input>;
-        await this.queue.updateJob({ uniqueId: job.uniqueId, input: newInput });
+        await this.engine.updateJob({ queue, token, jobId: job.id, input: newInput });
       }
     }
     return [result as Output, 'success'];
   }
 
-  run(workflows: Workflow<unknown, unknown>[]) {
+  run(queue: string, workflows: Workflow<unknown, unknown>[]) {
     let stop = false;
     const token = uuidv4();
     const workerPromise = (async () => {
       process.on('SIGTERM', () => {
         this.opts.logger.warn({
-          queue: this.queue.name,
+          queue,
         }, 'jobs worker: sigterm received; trying to stop gracefully');
         stop = true;
       });
-      this.opts.logger.info({ queue: this.queue.name }, `jobs worker: started`);
+      this.opts.logger.info({ queue }, `jobs worker: started`);
       while (!stop) {
         try {
-          const job = await this.queue.getNextJob({ token, block: true });
+          const job = await this.engine.acquireJob({ queue, token, block: true });
           if (job) {
-            const { uniqueId } = job;
+            const jobId = job.id;
             try {
               const workflow = findWorkflow(workflows, job.input);
-              const [output, status] = await this.runSteps(workflow, job, token);
+              const [output, status] = await this.runSteps(workflow, job, queue, token);
               if (status === 'sleeping') {
                 continue;
               } else if (status === 'success') {
-                await this.queue.completeJob({ token, uniqueId, result: { type: 'success', output } });
+                await this.engine.completeJob({ queue, token, jobId, result: { type: 'success', output } });
               } else {
                 assertNever(status);
               }
             } catch (err) {
               this.opts.logger.error({
-                err,
-                queue: this.queue.name
+                err, queue
               }, 'jobs worker: exception occured when running workflow');
-              await this.queue.completeJob({ token, uniqueId, result: { type: 'error' } });
+              const reason = `exception when running workflow: ${new String(err)}`;
+              await this.engine.completeJob({ queue, token, jobId, result: { type: 'error', reason } });
             }
           }
         } catch (err) {
           this.opts.logger.error({
-            err,
-            queue: this.queue.name
+            err, queue
           }, 'jobs worker: exception occured while running worker loop; sleeping 1s before continuing');
           await timeout(1000);
         }
       }
-      this.opts.logger.info({ queue: this.queue.name }, `jobs worker: stopped`);
+      this.opts.logger.info({ queue }, `jobs worker: stopped`);
     })();
     return async () => {
       stop = true;
