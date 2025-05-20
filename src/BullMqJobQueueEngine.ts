@@ -69,6 +69,18 @@ export function bullWorker<Input, Output>(
   });
 }
 
+function isSubset(objA: Record<string, string>, objB: Record<string, string>): boolean {
+  return Object.keys(objA).every((key) => objA[key] === objB[key]);
+}
+
+async function deleteKeys(redis: Redis, keys: string[]) {
+  let multi = redis.multi();
+  for (const key of keys) {
+    multi = multi.del(key)
+  }
+  await multi.exec();
+}
+
 export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
 
   private redis: Redis;
@@ -239,11 +251,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
       ...result,
       output: undefined
     } as JobResult<Output | undefined>;
-    this.redis
-      .multi()
-      .set(`jobs:result:${bullJob.data.resultKey}`, pack(result), 'PX', this.opts.maximumWaitTimeoutMs)
-      .del(`jobs:input:${bullJob.data.dataKey}`)
-      .exec();
+    this.redis.set(`jobs:result:${bullJob.data.resultKey}`, pack(result), 'PX', this.opts.maximumWaitTimeoutMs)
     if (result.type === 'error') {
       this.opts.logger.info({
         jobId,
@@ -274,6 +282,11 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
         resultKey: bullJob.data.resultKey,
       });
     }
+    // cleanup
+    await deleteKeys(this.redis, [
+      `jobs:input:${bullJob.data.dataKey}`,
+      ...Object.keys(bullJob.data.childResultKeys ?? []).map((resultKey) => `jobs:result:${resultKey}`)
+    ]);
   }
 
   private addStatusNotifierJob() {
@@ -472,11 +485,15 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     return unpack(buffer) as JobResult<Output>;
   }
 
-  private async getChildResults(childResultKeys: Record<string, string>) {
+  private async getChildResults(opts: { childResultKeys: Record<string, string>, delete?: boolean }) {
     let request = this.redis.multi();
-    const entries = Object.entries(childResultKeys);
+    const entries = Object.entries(opts.childResultKeys);
     for (const [_childId, resultKey] of entries) {
-      request = request.getBuffer(`jobs:result:${resultKey}`);
+      request = (
+        opts.delete
+          ? request.getdelBuffer(`jobs:result:${resultKey}`)
+          : request.getBuffer(`jobs:result:${resultKey}`)
+      );
     }
     const results = await request.exec();
     const resultMap = Object.fromEntries(
@@ -505,8 +522,8 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
       opts.children.map(({ data: { id } } ) => [id, `${bullJob.data.dataKey}:child:${id}`])
     );
 
-    if (bullJob.data.childResultKeys && isEqual(bullJob.data.childResultKeys, childResultKeys)) {
-      const childResults = await this.getChildResults(childResultKeys);
+    if (isSubset(childResultKeys, bullJob.data.childResultKeys ?? {})) {
+      const childResults = await this.getChildResults({ childResultKeys });
       if (childResults) {
         return childResults;
       }
@@ -534,12 +551,12 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
 
     await bullJob.updateData({
       ...bullJob.data,
-      childResultKeys
+      childResultKeys: { ...bullJob.data.childResultKeys, ...childResultKeys },
     });
 
     const shouldWait = await bullJob.moveToWaitingChildren(opts.token);
     if (!shouldWait) {
-      const childResults = await this.getChildResults(childResultKeys);
+      const childResults = await this.getChildResults({ childResultKeys });
       if (!childResults) {
         this.opts.logger.error({
           parentId: opts.parentId,
