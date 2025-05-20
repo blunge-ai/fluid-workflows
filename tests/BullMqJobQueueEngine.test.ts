@@ -60,10 +60,7 @@ test('submit children', async () => {
     });
   });
   await submitPromise;
-  let job: JobData<string, string> | undefined = undefined;
-  while (!job) {
-    job = await engine.acquireJob({ queue, token });
-  }
+  let job = await engine.acquireJob({ queue, token });
   assert(job);
   const results = await engine.submitChildrenSuspendParent({
     children: [
@@ -90,7 +87,8 @@ test('submit children', async () => {
   assert(child2);
   await engine.completeJob({ queue: 'child2-queue', token, jobId: child2.id, result: { type: 'success', output: 'child2-output' }});
 
-  await engine.acquireJob({ queue, token });
+  const sameJob = await engine.acquireJob({ queue, token });
+  assert(sameJob);
   const results2 = await engine.submitChildrenSuspendParent({
     children: [
       { data: { id: 'child1', meta: 'child1-meta', input: 'child1-input' },
@@ -99,9 +97,10 @@ test('submit children', async () => {
         queue: 'child2-queue' }
     ],
     token,
-    parentId: job.id,
+    parentId: sameJob.id,
     parentQueue: queue,
   });
+
   expect(results2).toBeDefined();
   assert(results2);
 
@@ -114,12 +113,14 @@ test('submit children', async () => {
   expect(results2.child2?.type).toEqual('success');
   assert(results2.child2?.type === 'success');
   expect(results2.child2.output).toEqual('child2-output');  
-  console.log('XXXXXXXXXXXXXXXXXXXXXXXX');
+
   const successResult = { type: 'success' as const, output: 'done' };
-  await engine.completeJob({ queue, token, jobId: job.id, result: successResult });
+  await engine.completeJob({ queue, token, jobId: sameJob.id, result: successResult });
+
   const resultStatus = await resultStatusPromise;
   expect(resultStatus.type).toBe('success');
   assert(resultStatus.type === 'success');
+
   const result = await engine.getJobResult({ resultKey: resultStatus.resultKey, delete: true });
   expect(result.type).toBe('success');
   assert(result.type === 'success');

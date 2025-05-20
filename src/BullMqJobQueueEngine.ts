@@ -530,7 +530,6 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     parentId: string,
     parentQueue: string,
   }): Promise<Record<string, JobResult<unknown>> | undefined> {
-
     const bullJob = await this.getQueue(opts.parentQueue)._getBullQueue()?.getJob(opts.parentId);
     if (!bullJob) {
       throw Error('parent job not found');
@@ -551,7 +550,7 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
       }
       this.opts.logger.warn({
         parentId: opts.parentId,
-        parentQueue: opts.parentQueue,
+        parentQueue: bullJob.queueQualifiedName,
         childrenCount: opts.children.length
       }, 'continue parent: parent job has existing childDataKeys but children are not running, retrying');
     }
@@ -562,7 +561,7 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
       this.submitJob({
         ...child,
         parentId: opts.parentId,
-        parentQueue: opts.parentQueue,
+        parentQueue: bullJob.queueQualifiedName,
         dataKey,
       });
     }));
@@ -571,7 +570,6 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
       ...bullJob.data,
       childDataKeys: { ...bullJob.data.childDataKeys, ...childDataKeys },
     });
-
     const shouldWait = await bullJob.moveToWaitingChildren(opts.token);
     if (!shouldWait) {
       const childResults = await this.getChildResults({ childDataKeys });
