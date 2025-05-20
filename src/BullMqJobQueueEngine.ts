@@ -3,10 +3,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { Worker as BullWorker, Queue as BullQueue } from 'bullmq';
 import Redis from 'ioredis';
 import { pack, unpack } from './packer';
-import isEqual from 'lodash/isEqual';
 import mapValues from 'lodash/mapValues';
 
 import type { JobQueueEngine, JobData, JobStatus, JobResult } from './JobQueueEngine';
+import { isResultStatus } from './JobQueueEngine';
 import { defaultRedisConnection, timeout, Logger, defaultLogger, assert } from './utils';
 
 const bullWorkerBlockingTimeoutSecs = 2;
@@ -37,9 +37,8 @@ export type QueueOpts = Opts & {
 type InternalJobData<Input, Meta> = {
   job: JobData<Input, Meta>,
   dataKey: string,
-  resultKey: string,
   parentId?: string,
-  childResultKeys?: Record<string, string>,
+  childDataKeys?: Record<string, string>,
 };
 
 export function bullQueue<Input, Output>(name: string, redis: Redis, attempts = 1) {
@@ -120,17 +119,15 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
       ...opts,
     };
     this.redis = opts.redis;
-    this.queue = bullQueue(this.opts.queue, this.redis);
+    this.queue = bullQueue(this.opts.queue, this.redis, this.opts.attempts);
     this.statusNotifierQueue = bullQueue(this.opts.statusNotifierQueue, this.redis);
   }
 
-  async submitJob(opts: { data: JobData<Input, Meta>, resultKey?: string, queue: string, parentId?: string, parentQueue?: string }): Promise<void> {
+  async submitJob(opts: { data: JobData<Input, Meta>, dataKey: string, queue: string, parentId?: string, parentQueue?: string }): Promise<void> {
     const job = opts.data;
-    const dataKey = uuidv4();
     const jobData: InternalJobData<Input, Meta> = {
       job,
-      dataKey,
-      resultKey: opts.resultKey ?? dataKey,
+      dataKey: opts.dataKey,
     };
     jobData.job = { ...job, input: undefined as Input };
     await this.redis.set(`jobs:input:${jobData.dataKey}`, pack(job.input), 'PX', this.opts.maximumWaitTimeoutMs);
@@ -143,7 +140,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
       this.queue.getWaitingCount(),
       this.queue.add('job', jobData, { jobId: job.id, parent })
     ]);
-    await this.publishStatus({
+    await this.publishStatus(jobData.dataKey, {
       jobId: job.id,
       type: 'queued',
       meta: job.meta,
@@ -223,7 +220,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
     }
     void bullJob.extendLock(token, lockTimeoutMs ?? this.opts.lockTimeoutMs);
     if (progressInfo != undefined) {
-      await this.publishStatus({
+      await this.publishStatus(bullJob.data.dataKey, {
         jobId,
         type: 'active',
         meta: bullJob.data.job.meta,
@@ -255,7 +252,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
       ...result,
       output: undefined
     } as JobResult<Output | undefined>;
-    this.redis.set(`jobs:result:${bullJob.data.resultKey}`, pack(result), 'PX', this.opts.maximumWaitTimeoutMs)
+    this.redis.set(`jobs:result:${bullJob.data.dataKey}`, pack(result), 'PX', this.opts.maximumWaitTimeoutMs)
     if (result.type === 'error') {
       this.opts.logger.info({
         jobId,
@@ -263,7 +260,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
         reason: result.reason,
       }, 'complete job: completed with error');
       await bullJob.moveToFailed(new Error(`job completed with error: ${result.reason}`), token, false);
-      await this.publishStatus({
+      await this.publishStatus(bullJob.data.dataKey, {
         jobId,
         type: result.type,
         meta: bullJob.data.job.meta,
@@ -271,7 +268,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
       });
     } else if (result.type === 'cancelled') {
       await bullJob.moveToCompleted(resultWithoutOutput, token, false);
-      await this.publishStatus({
+      await this.publishStatus(bullJob.data.dataKey, {
         jobId,
         type: result.type,
         meta: bullJob.data.job.meta,
@@ -279,17 +276,17 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
       });
     } else {
       await bullJob.moveToCompleted(resultWithoutOutput, token, false);
-      await this.publishStatus({
+      await this.publishStatus(bullJob.data.dataKey, {
         jobId,
         type: result.type,
         meta: bullJob.data.job.meta,
-        resultKey: bullJob.data.resultKey,
+        resultKey: bullJob.data.dataKey,
       });
     }
     // cleanup
     await deleteKeys(this.redis, [
       `jobs:input:${bullJob.data.dataKey}`,
-      ...Object.keys(bullJob.data.childResultKeys ?? []).map((resultKey) => `jobs:result:${resultKey}`)
+      ...Object.keys(bullJob.data.childDataKeys ?? []).map((dataKey) => `jobs:result:${dataKey}`)
     ]);
   }
 
@@ -349,9 +346,9 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
       waiting
     }, `status notifier: sending queueing status`);
     for (let index = 0; index < waiting; index += batchSize) {
-      const jobs = await this.queue.getWaiting(index, Math.min(index + batchSize, waiting));
-      await Promise.all(jobs.map(async (job, subIndex) => {
-        const jobId = job.id;
+      const bullJobs = await this.queue.getWaiting(index, Math.min(index + batchSize, waiting));
+      await Promise.all(bullJobs.map(async (bullJob, subIndex) => {
+        const jobId = bullJob.id;
         if (!jobId) {
           this.opts.logger.warn({
             queue: this.opts.queue,
@@ -359,18 +356,18 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
           }, 'job has no id');
           return;
         }
-        await this.publishStatus({
+        await this.publishStatus(bullJob.data.dataKey, {
           jobId,
           type: 'queued',
-          meta: job.data.job.meta,
+          meta: bullJob.data.job.meta,
           waiting: index + subIndex,
         });
       }));
     }
   }
 
-  async publishStatus(status: JobStatus<Meta, ProgressInfo>): Promise<void> {
-    await this.redis.publish(`jobs:status:${status.jobId}`, JSON.stringify(status));
+  async publishStatus(dataKey: string, status: JobStatus<Meta, ProgressInfo>): Promise<void> {
+    await this.redis.publish(`jobs:status:${dataKey}`, pack(status));
   }
 }
 
@@ -411,9 +408,53 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     queue: string,
     parentId?: string,
     parentQueue?: string,
-    resultKey?: string,
+    dataKey?: string,
+    statusHandler?: (status: JobStatus<Meta, ProgressInfo>) => void,
   }): Promise<void> {
-    await this.getQueue(opts.queue).submitJob(opts);
+    const dataKey = opts.dataKey ?? uuidv4();
+    if (opts.statusHandler) {
+      await this.subscribeToJobStatusWithDataKey(dataKey, opts.statusHandler);
+    }
+    await this.getQueue(opts.queue).submitJob({ ...opts, dataKey });
+  }
+
+  async subscribeToJobStatus(opts: {
+    jobId: string,
+    queue: string,
+    statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void
+  }): Promise<() => Promise<void>> {    
+    const bullJob = await this.getQueue(opts.queue)._getBullQueue()?.getJob(opts.jobId);
+    if (!bullJob) {
+      throw Error('job not found');
+    }
+    return this.subscribeToJobStatusWithDataKey(bullJob.data.dataKey, opts.statusHandler);
+  }
+
+  private async subscribeToJobStatusWithDataKey(
+    dataKey: string,
+    statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void
+  ): Promise<() => Promise<void>> {
+
+    const subscriptionKey = `jobs:status:${dataKey}`;
+    await this.subRedis.subscribe(subscriptionKey);
+    // TODO: should create an EventEmitter to dispatch messages locally
+    const handler = (channel: Buffer, payload: Buffer) => {
+      const channelString = channel.toString();
+      if (channelString === subscriptionKey) {
+        const status = unpack(payload) as JobStatus<Meta, ProgressInfo>;
+        if (isResultStatus(status.type)) {
+          unsub();
+        }
+        statusHandler(status);
+      }
+    };
+    this.subRedis.on("messageBuffer", handler);
+    
+    const unsub = async () => {
+      await this.subRedis.unsubscribe(subscriptionKey);
+      this.subRedis.off("messageBuffer", handler);
+    };
+    return unsub;
   }
 
   async acquireJob(opts: {
@@ -447,30 +488,6 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     return await this.getQueue(opts.queue).updateJob(opts);
   }
 
-  async subscribeToJobStatus(
-    jobId: string,
-    statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void
-  ): Promise<() => Promise<void>> {
-
-    const subscriptionKey = `jobs:status:${jobId}`;
-    await this.subRedis.subscribe(subscriptionKey);
-    
-    // TODO: should create an EventEmitter to dispatch messages locally
-    const handler = (channel: string, payload: Buffer) => {
-      if (channel === subscriptionKey) {
-        const status = unpack(payload) as JobStatus<Meta, ProgressInfo>;
-        assert(status.jobId === jobId);
-        statusHandler(status);
-      }
-    };
-    this.subRedis.on("messageBuffer", handler);
-    
-    return async () => {
-      await this.subRedis.unsubscribe(subscriptionKey);
-      this.subRedis.off("messageBuffer", handler);
-    };
-  }
-
   async getJobResult(opts: { resultKey: string, delete?: boolean }): Promise<JobResult<Output>> {
     const buffer = (
       opts.delete
@@ -486,14 +503,14 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     return unpack(buffer) as JobResult<Output>;
   }
 
-  private async getChildResults(opts: { childResultKeys: Record<string, string>, delete?: boolean }) {
+  private async getChildResults(opts: { childDataKeys: Record<string, string>, delete?: boolean }) {
     let request = this.redis.multi();
-    const entries = Object.entries(opts.childResultKeys);
-    for (const [_childId, resultKey] of entries) {
+    const entries = Object.entries(opts.childDataKeys);
+    for (const [_childId, dataKey] of entries) {
       request = (
         opts.delete
-          ? request.getdelBuffer(`jobs:result:${resultKey}`)
-          : request.getBuffer(`jobs:result:${resultKey}`)
+          ? request.getdelBuffer(`jobs:result:${dataKey}`)
+          : request.getBuffer(`jobs:result:${dataKey}`)
       );
     }
     const results = await request.exec();
@@ -519,12 +536,12 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
       throw Error('parent job not found');
     }
 
-    const childResultKeys = Object.fromEntries(
+    const childDataKeys = Object.fromEntries(
       opts.children.map(({ data: { id } } ) => [id, `${bullJob.data.dataKey}:child:${id}`])
     );
 
-    if (isSubset(childResultKeys, bullJob.data.childResultKeys ?? {})) {
-      const childResults = await this.getChildResults({ childResultKeys });
+    if (isSubset(childDataKeys, bullJob.data.childDataKeys ?? {})) {
+      const childResults = await this.getChildResults({ childDataKeys });
       if (childResults) {
         return childResults;
       }
@@ -536,28 +553,28 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
         parentId: opts.parentId,
         parentQueue: opts.parentQueue,
         childrenCount: opts.children.length
-      }, 'continue parent: parent job has existing childResultKeys but children are not running, retrying');
+      }, 'continue parent: parent job has existing childDataKeys but children are not running, retrying');
     }
 
     await Promise.all(opts.children.map((child) => {
-      const resultKey = childResultKeys[child.data.id];
-      assert(resultKey);
+      const dataKey = childDataKeys[child.data.id];
+      assert(dataKey);
       this.submitJob({
         ...child,
         parentId: opts.parentId,
         parentQueue: opts.parentQueue,
-        resultKey,
+        dataKey,
       });
     }));
 
     await bullJob.updateData({
       ...bullJob.data,
-      childResultKeys: { ...bullJob.data.childResultKeys, ...childResultKeys },
+      childDataKeys: { ...bullJob.data.childDataKeys, ...childDataKeys },
     });
 
     const shouldWait = await bullJob.moveToWaitingChildren(opts.token);
     if (!shouldWait) {
-      const childResults = await this.getChildResults({ childResultKeys });
+      const childResults = await this.getChildResults({ childDataKeys });
       if (!childResults) {
         this.opts.logger.error({
           parentId: opts.parentId,

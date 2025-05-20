@@ -1,6 +1,10 @@
 
 export type JobResultType = 'cancelled' | 'success' | 'error';
-export type JobStatusType = 'queued' | 'active' | JobResultType;
+export type JobStatusType = 'queued' | 'active' | 'suspended' | JobResultType;
+
+export function isResultStatus(statusType: JobStatusType): statusType is JobResultType {
+  return statusType === 'cancelled' || statusType === 'success' || statusType === 'error';
+}
 
 export type JobResultStatus<Meta> = {
   type: 'success',
@@ -59,8 +63,18 @@ export interface JobQueueEngine<Input, Output, Meta, ProgressInfo> {
 
   submitJob(opts: {
     data: JobData<Input, Meta>,
-    queue: string
+    queue: string,
+    parentId?: string,
+    parentQueue?: string,
+    dataKey?: string,
+    statusHandler?: (status: JobStatus<Meta, ProgressInfo>) => void
   }): Promise<void>;
+
+  subscribeToJobStatus(opts: {
+    jobId: string,
+    queue: string,
+    statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void
+  }): Promise<() => Promise<void>>;
 
   acquireJob(opts: {
     queue: string,
@@ -83,11 +97,6 @@ export interface JobQueueEngine<Input, Output, Meta, ProgressInfo> {
     progressInfo?: ProgressInfo,
     input?: Input,
   }): Promise<{ interrupt: boolean }>;
-
-  subscribeToJobStatus(
-    jobId: string,
-    statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void
-  ): Promise<() => Promise<void>>;
 
   getJobResult(opts: {
     resultKey: string,
