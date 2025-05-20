@@ -1,14 +1,15 @@
 import { expect, test } from 'vitest'
 import { Workflow } from '~/Workflow';
-import { InMemoryJobQueue } from '~/InMemoryJobQueue';
 import { WorkflowJobData } from '~/WorkflowJob';
-import type { JobQueue } from '~/JobQueue';
+import type { JobQueueEngine } from '~/JobQueueEngine';
 import { JobQueueWorkflowRunner } from '~/JobQueueWorkflowRunner';
 import { WorkflowDispatcher } from '~/WorkflowDispatcher';
+import { BullMqJobQueueEngine } from '~/BullMqJobQueueEngine';
 
+// fix this test ai!
 function setup() {
-  const queue = new InMemoryJobQueue<WorkflowJobData>('queue');
-  const dispatcher = new WorkflowDispatcher(<Input, Output>() => queue as JobQueue<Input, Output, unknown, unknown>);
+  const engine = new BullMqJobQueueEngine({ attempts: 1, lockTimeoutMs: 5000 });
+  const dispatcher = new WorkflowDispatcher(engine, { queue: 'default-queue' });
   const runner = new JobQueueWorkflowRunner(queue);
   return { queue, dispatcher, runner };
 }
