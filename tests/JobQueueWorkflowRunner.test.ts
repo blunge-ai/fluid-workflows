@@ -6,16 +6,18 @@ import { JobQueueWorkflowRunner } from '~/JobQueueWorkflowRunner';
 import { WorkflowDispatcher } from '~/WorkflowDispatcher';
 import { BullMqJobQueueEngine } from '~/BullMqJobQueueEngine';
 
-// fix this test ai!
 function setup() {
-  const engine = new BullMqJobQueueEngine({ attempts: 1, lockTimeoutMs: 5000 });
+  const engine = new BullMqJobQueueEngine<unknown, unknown, unknown, unknown>({ 
+    attempts: 1, 
+    lockTimeoutMs: 5000 
+  });
   const dispatcher = new WorkflowDispatcher(engine, { queue: 'default-queue' });
-  const runner = new JobQueueWorkflowRunner(queue);
-  return { queue, dispatcher, runner };
+  const runner = new JobQueueWorkflowRunner(engine);
+  return { engine, dispatcher, runner };
 }
 
 test('run step', async () => {
-  const { queue, dispatcher, runner } = setup();
+  const { engine, dispatcher, runner } = setup();
 
   const workflow = Workflow
     .create<{ a: number, b: number }>({ name: 'add-a-and-b', version: 1 })
@@ -25,14 +27,15 @@ test('run step', async () => {
 
   const stop = runner.run([workflow]);
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 12, b: 34 });
-  queue.releaseBlockedCalls();
+  // Wait for job processing to complete
+  await new Promise(resolve => setTimeout(resolve, 100));
   await stop();
 
   expect(result.c).toBe(46);
 });
 
 test('run child workflow', async () => {
-  const { queue, dispatcher, runner } = setup();
+  const { engine, dispatcher, runner } = setup();
 
   const child = Workflow
     .create<{ childInput: string }>({ name: 'child-workflow', version: 1 })
@@ -51,7 +54,8 @@ test('run child workflow', async () => {
 
   const stop = runner.run([workflow]);
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { inputString: 'XX' });
-  queue.releaseBlockedCalls();
+  // Wait for job processing to complete
+  await new Promise(resolve => setTimeout(resolve, 100));
   await stop();
 
   expect(result.output).toBe('output(child(input(XX)))');
