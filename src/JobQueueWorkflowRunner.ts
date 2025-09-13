@@ -1,14 +1,19 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowRunOptions } from './Workflow';
+import { Workflow, WorkflowRunOptions, WorkflowNames } from './Workflow';
 import type { JobQueueEngine, JobData, JobResult } from './JobQueueEngine';
 import { timeout, assertNever, assert, Logger, defaultLogger } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
+import pick from 'lodash/pick';
 
 export type Opts = {
   logger: Logger,
 };
 
 export type ConstructorOpts = Partial<Opts>;
+
+type RequireExactKeys<TObj, K extends PropertyKey> = Exclude<keyof TObj, K> extends never
+  ? (Exclude<K, keyof TObj> extends never ? TObj : never)
+  : never;
 
 function collectWorkflows(root: Workflow<any, any>): Workflow<any, any>[] {
   const res: Workflow<any, any>[] = [];
@@ -73,6 +78,7 @@ export class JobQueueWorkflowRunner {
     job: JobData<WorkflowJobData<Input>>,
     queue: string,
     token: string,
+    queues?: Record<string, string>,
     childResults?: Record<string, JobResult<unknown>>,
   ): Promise<[Output | undefined, 'suspended' | 'success']>{
     let stepIndex = job.input.step;
@@ -108,17 +114,23 @@ export class JobQueueWorkflowRunner {
             ? [['', step]] satisfies [string, Workflow<unknown, unknown>][]
             : Object.entries(step as Record<string, Workflow<unknown, unknown>>)
         );
-        const childrenPayload = entries.map(([key, childWorkflow]) => ({
-          data: {
-            id: `${job.id}:step:${stepIndex}:child:${key}`,
-            input: makeWorkflowJobData({
-              props: childWorkflow,
-              input: key === '' ? result : (result as Record<string, unknown>)[key]
-            }),
-            meta: undefined,
-          },
-          queue: childWorkflow.queue ?? queue, //XX
-        }));
+        const childrenPayload = entries.map(([key, childWorkflow]) => {
+          const childQueue = queues ? queues[childWorkflow.name] : childWorkflow.queue;
+          if (!childQueue) {
+            throw Error(`missing queue for child workflow: ${childWorkflow.name}`);
+          }
+          return {
+            data: {
+              id: `${job.id}:step:${stepIndex}:child:${key}`,
+              input: makeWorkflowJobData({
+                props: childWorkflow,
+                input: key === '' ? result : (result as Record<string, unknown>)[key]
+              }),
+              meta: undefined,
+            },
+            queue: childQueue
+          };
+        });
         if (!childResults) {
           const maybeResults = await this.engine.submitChildrenSuspendParent<unknown>({
             token,
@@ -155,8 +167,9 @@ export class JobQueueWorkflowRunner {
     return [result as Output, 'success'];
   }
 
-  run(workflow: Workflow<any, any>, opts?: { queue?: string }) {
-    const queue = opts?.queue ?? workflow.queue;
+  run<W extends Workflow<any, any, any>, Q extends Record<WorkflowNames<W>, string>>(workflow: W, opts?: { queue?: string, queues?: RequireExactKeys<Q, WorkflowNames<W>> }) {
+    const queuesMap = opts?.queues as Record<string, string> | undefined;
+    const queue = opts?.queue ?? (queuesMap && queuesMap?.[workflow.name]) ?? workflow.queue;
     if (!queue) {
       throw Error('runner: queue not specified');
     }
@@ -166,11 +179,13 @@ export class JobQueueWorkflowRunner {
     const workerPromise = (async () => {
       process.on('SIGTERM', () => {
         this.opts.logger.warn({
-          queue,
+          queue, workflow: pick(workflow, ['name', 'version'])
         }, 'workflow runner: sigterm received; trying to stop gracefully');
         stop = true;
       });
-      this.opts.logger.info({ queue }, `workflow runner: started`);
+      this.opts.logger.info({
+        queue, workflow: pick(workflow, ['name', 'version'])
+      }, `workflow runner: started`);
       while (!stop) {
         try {
           const {
@@ -181,7 +196,7 @@ export class JobQueueWorkflowRunner {
             const jobId = job.id;
             try {
               const wf = findWorkflow(workflows, job.input);
-              const [output, status] = await this.runSteps(wf, job as JobData<WorkflowJobData<any>>, queue, token, childResults);
+              const [output, status] = await this.runSteps(wf, job as JobData<WorkflowJobData<any>>, queue, token, queuesMap, childResults);
               if (status === 'suspended') {
                 continue;
               } else if (status === 'success') {
@@ -191,7 +206,7 @@ export class JobQueueWorkflowRunner {
               }
             } catch (err) {
               this.opts.logger.error({
-                err, queue
+                err, queue, workflow: pick(workflow, ['name', 'version'])
               }, 'workflow runner: exception occured when running workflow');
               const reason = `exception when running workflow: ${new String(err)}`;
               await this.engine.completeJob({ queue, token, jobId, result: { type: 'error', reason } });
@@ -199,12 +214,14 @@ export class JobQueueWorkflowRunner {
           }
         } catch (err) {
           this.opts.logger.error({
-            err, queue
+            err, queue, workflow: pick(workflow, ['name', 'version'])
           }, 'workflow runner: exception occured while running worker loop; sleeping 1s before continuing');
           await timeout(1000);
         }
       }
-      this.opts.logger.info({ queue }, `workflow runner: stopped`);
+      this.opts.logger.info({
+        queue, workflow: pick(workflow, ['name', 'version'])
+      }, `workflow runner: stopped`);
     })();
     return async () => {
       stop = true;
