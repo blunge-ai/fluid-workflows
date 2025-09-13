@@ -33,7 +33,7 @@ export class WorkflowDispatcher {
     opts?: { jobId?: string, queue?: string, meta?: Meta },
   ) {
     const jobId = opts?.jobId ?? `${props.name}-${uuidv4()}`;
-    const queue = opts?.queue ?? this.opts.queue;
+    const queue = opts?.queue ?? props.queue ?? this.opts.queue;
     const workflowInput = {
       name: props.name,
       version: props.version,
@@ -53,7 +53,7 @@ export class WorkflowDispatcher {
     opts?: { jobId?: string, queue?: string, meta?: Meta },
   ) {
     const jobId = opts?.jobId ?? `${props.name}-${uuidv4()}`;
-    const queue = opts?.queue ?? this.opts.queue;
+    const queue = opts?.queue ?? props.queue ?? this.opts.queue;
     const workflowInput = makeWorkflowJobData({ props, input });
 
     const resultStatusPromise = new Promise<JobResultStatus<unknown>>((resolve) => {

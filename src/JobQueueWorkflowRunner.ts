@@ -10,6 +10,36 @@ export type Opts = {
 
 export type ConstructorOpts = Partial<Opts>;
 
+function collectWorkflows(root: Workflow<any, any>): Workflow<any, any>[] {
+  const res: Workflow<any, any>[] = [];
+  const seen = new Set<string>();
+  const visit = (wf: Workflow<any, any>) => {
+    const key = `${wf.name}:${wf.version}`;
+    if (seen.has(key)) {
+      if (!res.includes(wf)) {
+        throw Error(`duplicate workflow with mismatching instance identity: ${key}`);
+      }
+      return;
+    };
+    seen.add(key);
+    res.push(wf);
+    for (const step of wf.steps) {
+      if (step instanceof Workflow) {
+        visit(step as Workflow<any, any>);
+      } else if (typeof step === 'function') {
+        continue;
+      } else {
+        const record = step as Record<string, Workflow<any, any>>;
+        for (const child of Object.values(record)) {
+          visit(child);
+        }
+      }
+    }
+  };
+  visit(root);
+  return res;
+}
+
 function findWorkflow(workflows: Workflow<any, any>[], jobData: WorkflowJobData) {
   const { name, version, totalSteps, step } = jobData;
   if (step >= totalSteps) {
@@ -78,18 +108,21 @@ export class JobQueueWorkflowRunner {
             ? [['', step]] satisfies [string, Workflow<unknown, unknown>][]
             : Object.entries(step as Record<string, Workflow<unknown, unknown>>)
         );
-        const childJobs = entries.map(([key, childWorkflow]) => ({
-          id: `${job.id}:step:${stepIndex}:child:${key}`,
-          input: makeWorkflowJobData({
-            props: childWorkflow,
-            input: key === '' ? result : (result as Record<string, unknown>)[key]
-          }),
-          meta: undefined,
+        const childrenPayload = entries.map(([key, childWorkflow]) => ({
+          data: {
+            id: `${job.id}:step:${stepIndex}:child:${key}`,
+            input: makeWorkflowJobData({
+              props: childWorkflow,
+              input: key === '' ? result : (result as Record<string, unknown>)[key]
+            }),
+            meta: undefined,
+          },
+          queue: childWorkflow.queue ?? queue, //XX
         }));
         if (!childResults) {
           const maybeResults = await this.engine.submitChildrenSuspendParent<unknown>({
             token,
-            children: childJobs.map((data) => ({ data, queue })),
+            children: childrenPayload,
             parentId: job.id,
             parentQueue: queue,
           });
@@ -122,7 +155,12 @@ export class JobQueueWorkflowRunner {
     return [result as Output, 'success'];
   }
 
-  run(queue: string, workflows: Workflow<any, any>[]) {
+  run(workflow: Workflow<any, any>, opts?: { queue?: string }) {
+    const queue = opts?.queue ?? workflow.queue;
+    if (!queue) {
+      throw Error('runner: queue not specified');
+    }
+    const workflows = collectWorkflows(workflow);
     let stop = false;
     const token = uuidv4();
     const workerPromise = (async () => {
@@ -142,8 +180,8 @@ export class JobQueueWorkflowRunner {
           if (job) {
             const jobId = job.id;
             try {
-              const workflow = findWorkflow(workflows, job.input);
-              const [output, status] = await this.runSteps(workflow, job, queue, token, childResults);
+              const wf = findWorkflow(workflows, job.input);
+              const [output, status] = await this.runSteps(wf, job as JobData<WorkflowJobData<any>>, queue, token, childResults);
               if (status === 'suspended') {
                 continue;
               } else if (status === 'success') {

@@ -3,6 +3,7 @@ export type WorkflowProps = {
   name: string,
   version: number,
   numSteps: number,
+  queue?: string,
 };
 
 export type WorkflowRunOptions = {
@@ -22,23 +23,25 @@ export class Workflow<Input, Output> implements WorkflowProps {
   public name: string;
   public version: number;
   public numSteps: number;
+  public queue?: string;
 
   constructor(
-    props: Pick<WorkflowProps, 'name' | 'version'>,
+    props: Pick<WorkflowProps, 'name' | 'version' | 'queue'>,
     public steps: Array<StepFn<unknown, unknown> | Workflow<unknown, unknown> | Record<string | number | symbol, Workflow<unknown, unknown>>>,
   ) {
     this.name = props.name;
     this.version = props.version;
+    this.queue = props.queue;
     this.numSteps = steps.length;
   }
 
-  static create<Input>(props: Pick<WorkflowProps, 'name' | 'version'>) {
+  static create<Input>(props: Pick<WorkflowProps, 'name' | 'version' | 'queue'>) {
     return new Workflow<Input, Input>(props, []);
   }
 
   step<NewOutput>(stepFn: StepFn<Output, NewOutput>): Workflow<Input, NewOutput> {
     return new Workflow(
-      { name: this.name, version: this.version },
+      { name: this.name, version: this.version, queue: this.queue },
       [ ...this.steps, stepFn as StepFn<unknown, unknown> ]
     );
   }
@@ -49,7 +52,7 @@ export class Workflow<Input, Output> implements WorkflowProps {
   childStep<C extends ChildrenFor<Output>>(children: ExactChildren<Output, C>): Workflow<Input, OutputsOfChildren<C>>;
   childStep(childOrChildren: unknown): any {
     return new Workflow(
-      { name: this.name, version: this.version },
+      { name: this.name, version: this.version, queue: this.queue },
       [ ...this.steps, childOrChildren as Workflow<unknown, unknown> ]
     );
   }

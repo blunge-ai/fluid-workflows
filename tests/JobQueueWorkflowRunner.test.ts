@@ -26,7 +26,7 @@ test('run step', async () => {
       return { c: a + b };
     });
 
-  const stop = runner.run(queue, [workflow]);
+  const stop = runner.run(workflow, { queue });
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 12, b: 34 });
   // Wait for job processing to complete
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -53,11 +53,12 @@ test('run child workflow', async () => {
       return { output: `output(${childOutput})` };
     });
 
-  const stop = runner.run(queue, [workflow, child]);
+  const stopParent = runner.run(workflow, { queue });
+  const stopChild = runner.run(child, { queue });
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { parentInput: 'XX' });
-  // Wait for job processing to complete
   await new Promise(resolve => setTimeout(resolve, 100));
-  await stop();
+  await stopParent();
+  await stopChild();
 
   expect(result.output).toBe('output(child(input(XX)))');
 });
@@ -87,10 +88,14 @@ test('run two named children', async () => {
       return { out: `${one.a2}-${two.s2}` };
     });
 
-  const stop = runner.run(queue, [parent, child1, child2]);
+  const stopParent = runner.run(parent, { queue });
+  const stopChild1 = runner.run(child1, { queue });
+  const stopChild2 = runner.run(child2, { queue });
   const result = await dispatcher.dispatchAwaitingOutput(parent, { n: 5 });
   await new Promise(resolve => setTimeout(resolve, 100));
-  await stop();
+  await stopParent();
+  await stopChild1();
+  await stopChild2();
 
   expect(result.out).toBe('12-child2(n=5)');
 });
