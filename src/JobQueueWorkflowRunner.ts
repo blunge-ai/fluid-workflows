@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, DispatchableWorkflow, DispatchOpts, WorkflowRunOptions } from './Workflow';
+import { Workflow, WorkflowRunOptions, StepFn } from './Workflow';
 import type { JobQueueEngine, JobData, JobResult } from './JobQueueEngine';
 import { timeout, assertNever, assert, Logger, defaultLogger } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
@@ -66,35 +66,28 @@ export class JobQueueWorkflowRunner {
           progressInfo: { phase, progress } satisfies WorkflowProgressInfo
         })
       },
-      dispatch: <Input, Output>(
-        workflow: Workflow<Input, Output>,
-        input: Input,
-        opts?: DispatchOpts
-      ) => new DispatchableWorkflow(workflow, input, opts),
     } satisfies WorkflowRunOptions;
 
     for (const step of steps) {
-      if (!childResults) {
-        result = await step(result, runOptions);
-        if (result instanceof DispatchableWorkflow) {
-          // TODO support for multiple children
+      if (step instanceof Workflow) {
+        if (!childResults) {
+          const childWorkflow = step as Workflow<unknown, unknown>;
           const childJob = {
-            id: result.opts?.jobId ?? uuidv4(),
-            input: makeWorkflowJobData({ props: result.workflow, input: result.input }),
-            meta: result.opts?.meta,
+            id: `${childWorkflow.name}-${uuidv4()}`,
+            input: makeWorkflowJobData({ props: childWorkflow, input: result as unknown }),
+            meta: undefined,
           };
-          childResults = await this.engine.submitChildrenSuspendParent({
+          const maybeResults = await this.engine.submitChildrenSuspendParent<unknown>({
             token,
             children: [{ data: childJob, queue }],
             parentId: job.id,
             parentQueue: queue
           });
-          if (!childResults) {
+          if (!maybeResults) {
             return [undefined, 'suspended'];
           }
+          childResults = maybeResults;
         }
-      }
-      if (childResults) {
         const childResult = Object.values(childResults)[0];
         assert(childResult);
         childResults = undefined; // valid only for the first step
@@ -103,7 +96,10 @@ export class JobQueueWorkflowRunner {
           throw Error('error running child job');
         }
         result = childResult.output;
+      } else {
+        result = await step(result, runOptions);
       }
+
       stepIndex += 1;
       // the result of the last step will be used to complete the job and doesn't need to be persisted
       if (stepIndex !== workflow.steps.length) {

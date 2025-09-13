@@ -1,4 +1,4 @@
-import { Workflow, DispatchableWorkflow, DispatchOpts, WorkflowRunOptions } from './Workflow';
+import { Workflow, WorkflowRunOptions, StepFn } from './Workflow';
 
 export class InMemoryWorkflowRunner {
   async run<Input, Output>(workflow: Workflow<Input, Output>, input: Input) {
@@ -8,16 +8,12 @@ export class InMemoryWorkflowRunner {
         console.log(`phase: ${phase}, progress: ${progress}`);
         return { interrupt: false };
       },
-      dispatch: <Input, Output>(
-        props: Workflow<Input, Output>,
-        input: Input,
-        opts?: DispatchOpts
-      ) => new DispatchableWorkflow(props, input, opts),
     } satisfies WorkflowRunOptions;
     for (const step of workflow.steps) {
-      result = await step(result, runOptions);
-      if (result instanceof DispatchableWorkflow) {
-        result = await this.run(result.workflow, result.input);
+      if (step instanceof Workflow) {
+        result = await this.run(step as Workflow<unknown, unknown>, result);
+      } else {
+        result = await (step as StepFn<unknown, unknown>)(result, runOptions);
       }
     }
     return result as Output;

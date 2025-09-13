@@ -45,9 +45,10 @@ test('run child workflow', async () => {
 
   const workflow = Workflow
     .create<{ parentInput: string }>({ name: 'parent-workflow', version: 1 })
-    .step(async ({ parentInput }, { dispatch }) => {
-      return dispatch(child, { childInput: `input(${parentInput})` });;
+    .step(async ({ parentInput }) => {
+      return { childInput: `input(${parentInput})` };
     })
+    .childStep(child)
     .step(async ({ childOutput }) => {
       return { output: `output(${childOutput})` };
     });

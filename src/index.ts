@@ -1,6 +1,5 @@
 export {
  Workflow,
- DispatchableWorkflow as RunnableWorkflow,
 } from './Workflow';
 export type {
  WorkflowProps as WorkflowOptions,
