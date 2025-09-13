@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { assert } from '~/utils';
+import { assert, timeout } from '~/utils';
 import { JobResultStatus } from '~/JobQueueEngine';
 import { BullMqJobQueueEngine } from '~/BullMqJobQueueEngine';
 import { v4 as uuidv4 } from 'uuid';
@@ -48,10 +48,12 @@ test('submit children', async () => {
   });
   const token = 'test-token2';
   const queue = `queue-${uuidv4()}`;
+  const queue2 = `queue2-${uuidv4()}`;
+  const queue3 = `queue3-${uuidv4()}`;
   let submitPromise: Promise<void> | undefined;
   const resultStatusPromise = new Promise<JobResultStatus<string>>((resolve) => {
     submitPromise = engine.submitJob({
-      data: { id: 'parent', meta: 'meta', input: 'input-data' },
+      data: { id: `parent-${uuidv4()}`, meta: 'meta', input: 'input-data' },
       queue,
       statusHandler: (status) => {
         if (status.type === 'success') {
@@ -63,12 +65,13 @@ test('submit children', async () => {
   await submitPromise;
   let { data: job } = await engine.acquireJob({ queue, token });
   assert(job);
+
   const results = await engine.submitChildrenSuspendParent({
     children: [
-      { data: { id: 'child1', meta: 'child1-meta', input: 'child1-input' },
-        queue: 'child1-queue' },
-      { data: { id: 'child2', meta: 'child2-meta', input: 'child2-input' },
-        queue: 'child2-queue' }
+      { data: { id: `child1-${uuidv4()}`, meta: 'child1-meta', input: 'child1-input' },
+        queue: queue2 },
+      { data: { id: `child2-${uuidv4()}`, meta: 'child2-meta', input: 'child2-input' },
+        queue: queue3 }
     ],
     token,
     parentId: job.id,
@@ -77,46 +80,37 @@ test('submit children', async () => {
   expect(results).toBeUndefined();
 
   // complete child1
-  const { data: child1 } = await engine.acquireJob({ queue: 'child1-queue', token });
+  const { data: child1 } = await engine.acquireJob({ queue: queue2, token });
   expect(child1).toBeDefined()
   assert(child1);
-  await engine.completeJob({ queue: 'child1-queue', token, jobId: child1.id, result: { type: 'success', output: 'child1-output' }});
+  await engine.completeJob({ queue: queue2, token, jobId: child1.id, result: { type: 'success', output: 'child1-output' }});
 
   // complete child2
-  const { data: child2 } = await engine.acquireJob({ queue: 'child2-queue', token });
+  const { data: child2 } = await engine.acquireJob({ queue: queue3, token });
   expect(child2).toBeDefined()
   assert(child2);
-  await engine.completeJob({ queue: 'child2-queue', token, jobId: child2.id, result: { type: 'success', output: 'child2-output' }});
+  await engine.completeJob({ queue: queue3, token, jobId: child2.id, result: { type: 'success', output: 'child2-output' }});
 
-  const { data: sameJob } = await engine.acquireJob({ queue, token });
-  assert(sameJob);
-  const results2 = await engine.submitChildrenSuspendParent({
-    children: [
-      { data: { id: 'child1', meta: 'child1-meta', input: 'child1-input' },
-        queue: 'child1-queue' },
-      { data: { id: 'child2', meta: 'child2-meta', input: 'child2-input' },
-        queue: 'child2-queue' }
-    ],
-    token,
-    parentId: sameJob.id,
-    parentQueue: queue,
-  });
+  const { data: parentAgain, childResults: results2 } = await engine.acquireJob({ queue, token, block: true });
+  assert(parentAgain);
 
   expect(results2).toBeDefined();
   assert(results2);
 
   // child1 result
-  expect(results2.child1?.type).toEqual('success');
-  assert(results2.child1?.type === 'success');
-  expect(results2.child1.output).toEqual('child1-output');
+  const result1 = results2[child1.id];
+  expect(result1?.type).toEqual('success');
+  assert(result1?.type === 'success');
+  expect(result1.output).toEqual('child1-output');
 
   // child2 result
-  expect(results2.child2?.type).toEqual('success');
-  assert(results2.child2?.type === 'success');
-  expect(results2.child2.output).toEqual('child2-output');  
+  const result2 = results2[child2.id];
+  expect(result2?.type).toEqual('success');
+  assert(result2?.type === 'success');
+  expect(result2.output).toEqual('child2-output');
 
   const successResult = { type: 'success' as const, output: 'done' };
-  await engine.completeJob({ queue, token, jobId: sameJob.id, result: successResult });
+  await engine.completeJob({ queue, token, jobId: parentAgain.id, result: successResult });
 
   const resultStatus = await resultStatusPromise;
   expect(resultStatus.type).toBe('success');

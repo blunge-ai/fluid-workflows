@@ -622,7 +622,7 @@ export class BullMqJobQueueEngine implements JobQueueEngine {
     await Promise.all(opts.children.map((child) => {
       const dataKey = childDataKeys[child.data.id];
       assert(dataKey);
-      this.submitJob({
+      return this.submitJob({
         ...child,
         parentId: opts.parentId,
         parentQueue: parentBullJob.queueQualifiedName,
