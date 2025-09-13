@@ -1,15 +1,16 @@
 import { expect, test } from 'vitest'
 import { assert } from '~/utils';
-import { JobResultStatus, JobData } from '~/JobQueueEngine';
+import { JobResultStatus } from '~/JobQueueEngine';
 import { BullMqJobQueueEngine } from '~/BullMqJobQueueEngine';
+import { v4 as uuidv4 } from 'uuid';
 
 test('submit job', async () => {
-  const engine = new BullMqJobQueueEngine<string, string, string, string>({
+  const engine = new BullMqJobQueueEngine({
     attempts: 1,
     lockTimeoutMs: 8000
   });
   const token = 'test-token';
-  const queue = 'test-queue';
+  const queue = `queue-${uuidv4()}`;
   let submitPromise: Promise<void> | undefined;
   const resultStatusPromise = new Promise<JobResultStatus<string>>((resolve) => {
     submitPromise = engine.submitJob({
@@ -23,7 +24,7 @@ test('submit job', async () => {
     });
   });
   await submitPromise;
-  const job = await engine.acquireJob({ queue, token });
+  const { data: job } = await engine.acquireJob({ queue, token });
   expect(job).toBeDefined();
   assert(job);
   expect(job.id).toBe('job1');
@@ -41,12 +42,12 @@ test('submit job', async () => {
 });
 
 test('submit children', async () => {
-  const engine = new BullMqJobQueueEngine<string, string, string, string>({
+  const engine = new BullMqJobQueueEngine({
     attempts: 1,
     lockTimeoutMs: 8000
   });
   const token = 'test-token2';
-  const queue = 'test-queue2';
+  const queue = `queue-${uuidv4()}`;
   let submitPromise: Promise<void> | undefined;
   const resultStatusPromise = new Promise<JobResultStatus<string>>((resolve) => {
     submitPromise = engine.submitJob({
@@ -60,7 +61,7 @@ test('submit children', async () => {
     });
   });
   await submitPromise;
-  let job = await engine.acquireJob({ queue, token });
+  let { data: job } = await engine.acquireJob({ queue, token });
   assert(job);
   const results = await engine.submitChildrenSuspendParent({
     children: [
@@ -76,18 +77,18 @@ test('submit children', async () => {
   expect(results).toBeUndefined();
 
   // complete child1
-  const child1 = await engine.acquireJob({ queue: 'child1-queue', token });
+  const { data: child1 } = await engine.acquireJob({ queue: 'child1-queue', token });
   expect(child1).toBeDefined()
   assert(child1);
   await engine.completeJob({ queue: 'child1-queue', token, jobId: child1.id, result: { type: 'success', output: 'child1-output' }});
 
   // complete child2
-  const child2 = await engine.acquireJob({ queue: 'child2-queue', token });
+  const { data: child2 } = await engine.acquireJob({ queue: 'child2-queue', token });
   expect(child2).toBeDefined()
   assert(child2);
   await engine.completeJob({ queue: 'child2-queue', token, jobId: child2.id, result: { type: 'success', output: 'child2-output' }});
 
-  const sameJob = await engine.acquireJob({ queue, token });
+  const { data: sameJob } = await engine.acquireJob({ queue, token });
   assert(sameJob);
   const results2 = await engine.submitChildrenSuspendParent({
     children: [

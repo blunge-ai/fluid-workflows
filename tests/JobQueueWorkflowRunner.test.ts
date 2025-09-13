@@ -1,23 +1,24 @@
 import { expect, test } from 'vitest'
 import { Workflow } from '~/Workflow';
-import { WorkflowJobData } from '~/WorkflowJob';
-import type { JobQueueEngine } from '~/JobQueueEngine';
 import { JobQueueWorkflowRunner } from '~/JobQueueWorkflowRunner';
 import { WorkflowDispatcher } from '~/WorkflowDispatcher';
 import { BullMqJobQueueEngine } from '~/BullMqJobQueueEngine';
+import { v4 as uuidv4 } from 'uuid';
 
 function setup() {
-  const engine = new BullMqJobQueueEngine<WorkflowJobData<unknown>, unknown, unknown, unknown>({ 
+  const engine = new BullMqJobQueueEngine({ 
     attempts: 1,
-    lockTimeoutMs: 5000
+    lockTimeoutMs: 5000,
+    blockingTimeoutSecs: 0.1,
   });
-  const dispatcher = new WorkflowDispatcher(engine, { queue: 'default-queue' });
+  const queue = `queue-${uuidv4()}`;
+  const dispatcher = new WorkflowDispatcher(engine, { queue });
   const runner = new JobQueueWorkflowRunner(engine);
-  return { dispatcher, runner };
+  return { dispatcher, runner, queue };
 }
 
 test('run step', async () => {
-  const { dispatcher, runner } = setup();
+  const { dispatcher, runner, queue } = setup();
 
   const workflow = Workflow
     .create<{ a: number, b: number }>({ name: 'add-a-and-b', version: 1 })
@@ -25,17 +26,16 @@ test('run step', async () => {
       return { c: a + b };
     });
 
-  const stop = runner.run('default-queue', [workflow]);
+  const stop = runner.run(queue, [workflow]);
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 12, b: 34 });
   // Wait for job processing to complete
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();
-
   expect(result.c).toBe(46);
 });
 
 test('run child workflow', async () => {
-  const { dispatcher, runner } = setup();
+  const { dispatcher, runner, queue } = setup();
 
   const child = Workflow
     .create<{ childInput: string }>({ name: 'child-workflow', version: 1 })
@@ -44,16 +44,16 @@ test('run child workflow', async () => {
     });
 
   const workflow = Workflow
-    .create<{ inputString: string }>({ name: 'parent-workflow', version: 1 })
-    .step(async ({ inputString }, { dispatch }) => {
-      return dispatch(child, { childInput: `input(${inputString})` });;
+    .create<{ parentInput: string }>({ name: 'parent-workflow', version: 1 })
+    .step(async ({ parentInput }, { dispatch }) => {
+      return dispatch(child, { childInput: `input(${parentInput})` });;
     })
     .step(async ({ childOutput }) => {
       return { output: `output(${childOutput})` };
     });
 
-  const stop = runner.run('default-queue', [workflow]);
-  const result = await dispatcher.dispatchAwaitingOutput(workflow, { inputString: 'XX' });
+  const stop = runner.run(queue, [workflow, child]);
+  const result = await dispatcher.dispatchAwaitingOutput(workflow, { parentInput: 'XX' });
   // Wait for job processing to complete
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();

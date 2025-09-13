@@ -10,7 +10,7 @@ export type WorkflowRunOptions = {
   dispatch: DispatchFn,
 };
 
-export type DispatchOpts = { jobId?: string };
+export type DispatchOpts = { jobId?: string, meta?: string };
 
 export type DispatchFn = <Input, Output>(
   props: Workflow<Input, Output>,

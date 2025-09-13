@@ -2,8 +2,12 @@
 export type JobResultType = 'cancelled' | 'success' | 'error';
 export type JobStatusType = 'queued' | 'active' | 'suspended' | JobResultType;
 
-export function isResultStatus(statusType: JobStatusType): statusType is JobResultType {
+export function isResultStatusType(statusType: JobStatusType): statusType is JobResultType {
   return statusType === 'cancelled' || statusType === 'success' || statusType === 'error';
+}
+
+export function isResultStatus(status: JobStatus<unknown, unknown>): status is JobResultStatus<unknown> {
+  return isResultStatusType(status.type);
 }
 
 export type JobResultStatus<Meta> = {
@@ -59,34 +63,37 @@ export type JobData<Input, Meta = unknown> = {
   input: Input,
 };
 
-export interface JobQueueEngine<Input, Output, Meta, ProgressInfo> {
+export interface JobQueueEngine {
 
-  submitJob(opts: {
-    data: JobData<Input, Meta>,
+  submitJob<Meta, ProgressInfo>(opts: {
     queue: string,
+    data: JobData<unknown, Meta>,
     parentId?: string,
     parentQueue?: string,
     dataKey?: string,
     statusHandler?: (status: JobStatus<Meta, ProgressInfo>) => void
   }): Promise<void>;
 
-  subscribeToJobStatus(opts: {
-    jobId: string,
+  subscribeToJobStatus<Meta, ProgressInfo>(opts: {
     queue: string,
+    jobId: string,
     statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void
   }): Promise<() => Promise<void>>;
 
-  acquireJob(opts: {
+  acquireJob<Input, Meta, ChildOutput>(opts: {
     queue: string,
     token: string,
     block?: boolean
-  }): Promise<JobData<Input, Meta> | undefined>;
+  }): Promise<{
+    data: JobData<Input, Meta> | undefined,
+    childResults?: Record<string, JobResult<ChildOutput>>
+  }>;
 
   completeJob(opts: {
     queue: string,
     token: string,
     jobId: string,
-    result: JobResult<Output>
+    result: JobResult<unknown>
   }): Promise<void>;
 
   updateJob(opts: {
@@ -94,24 +101,24 @@ export interface JobQueueEngine<Input, Output, Meta, ProgressInfo> {
     token: string,
     jobId: string,
     lockTimeoutMs?: number,
-    progressInfo?: ProgressInfo,
-    input?: Input,
+    progressInfo?: unknown,
+    input?: unknown,
   }): Promise<{ interrupt: boolean }>;
 
-  getJobResult(opts: {
+  getJobResult<Output>(opts: {
     resultKey: string,
     delete?: boolean
   }): Promise<JobResult<Output>>;
 
-  submitChildrenSuspendParent(opts: {
+  submitChildrenSuspendParent<ChildOutput>(opts: {
     children: {
-      data: JobData<Input, Meta>,
+      data: JobData<unknown, unknown>,
       queue: string
     }[],
     token: string,
     parentId: string,
     parentQueue: string,
-  }): Promise<Record<string, unknown> | undefined>;
+  }): Promise<Record<string, JobResult<ChildOutput>> | undefined>;
 
   //TODO releaseBlockedCalls();
 }

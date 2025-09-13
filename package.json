@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "tsc": "tsc",
     "lint": "eslint",
     "test": "vitest --config ./vitest.config.ts"
   },

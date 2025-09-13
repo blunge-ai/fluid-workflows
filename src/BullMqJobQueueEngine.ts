@@ -6,11 +6,8 @@ import { pack, unpack } from './packer';
 import mapValues from 'lodash/mapValues';
 
 import type { JobQueueEngine, JobData, JobStatus, JobResult } from './JobQueueEngine';
-import { isResultStatus } from './JobQueueEngine';
+import { isResultStatusType } from './JobQueueEngine';
 import { defaultRedisConnection, timeout, Logger, defaultLogger, assert } from './utils';
-
-const bullWorkerBlockingTimeoutSecs = 2;
-const fallbackDelayMs = 200;
 
 export type Opts = {
   attempts: number,
@@ -20,9 +17,12 @@ export type Opts = {
   statusNotifierRepeatMs: number,
   redisConnection: () => Redis,
   concurrency: number,
-  fallback: boolean,
+  polling: boolean,
   logger: Logger,
   maximumWaitTimeoutMs: number,
+
+  bullWorkerBlockingTimeoutSecs: number,
+  pollingDelayMs: number,
 };
 
 export type ConstructorOpts
@@ -32,6 +32,8 @@ export type ConstructorOpts
 export type QueueOpts = Opts & {
   queue: string,
   statusNotifierQueue: string,
+  bullWorkerBlockingTimeoutSecs: number,
+  pollingDelayMs: number,
 };
 
 type InternalJobData<Input, Meta> = {
@@ -39,6 +41,7 @@ type InternalJobData<Input, Meta> = {
   dataKey: string,
   parentId?: string,
   childDataKeys?: Record<string, string>,
+  waitingForChildren?: boolean,
 };
 
 export function bullQueue<Input, Output>(name: string, redis: Redis, attempts = 1) {
@@ -80,7 +83,7 @@ async function deleteKeys(redis: Redis, keys: string[]) {
   await multi.exec();
 }
 
-export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
+export class BullMqJobQueue<Input = unknown, Output = unknown, Meta = unknown, ProgressInfo = unknown> {
 
   private redis: Redis;
   private queue: BullQueue<InternalJobData<Input, Meta>, JobResult<Output>>;
@@ -95,7 +98,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
         this.opts.redisConnection(),
         {
           timeoutMs: this.opts.lockTimeoutMs,
-          blockingTimeoutSecs: bullWorkerBlockingTimeoutSecs,
+          blockingTimeoutSecs: this.opts.bullWorkerBlockingTimeoutSecs,
         }
       );
       this.startMaintenanceWorkers();
@@ -113,7 +116,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
     this.processStatusNotifierJobs();
   }
 
-  constructor(opts: Opts & { queue: string, redis: Redis }) {
+  constructor(opts: Opts & { queue: string, redis: Redis, bullWorkerBlockingTimeoutSecs: number, pollingDelayMs: number }) {
     this.opts = {
       statusNotifierQueue: `${opts.queue}/status-notifier`,
       ...opts,
@@ -148,22 +151,34 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
     });
   }
 
-  async acquireJob(opts: { token: string, block?: boolean }): Promise<JobData<Input, Meta> | undefined> {
+  async acquireJob(opts: { token: string, block?: boolean }): Promise<{
+    data: JobData<Input, Meta> | undefined,
+    childDataKeys?: Record<string, string>
+  }> {
     const { token, block } = opts;
     const start = Date.now();
-    while (true) {
+    const forcePolling = this.opts.blockingTimeoutSecs < this.opts.bullWorkerBlockingTimeoutSecs;
+    if (forcePolling) {
+      this.opts.logger.warn({
+        queue: this.opts.queue
+      }, 'acquire job: blockingTimeoutSecs is smaller than the minimum, forcing polling mode');
+    }
+    const polling = this.opts.polling || forcePolling;
+    for (let iteration = 0;; iteration++) {
       const elapsedMs = Date.now() - start;
-      // we can't block exactly for the right time, but we can reduce the margin of error to 1/2
-      const marginMs = bullWorkerBlockingTimeoutSecs * 1000 / 2;
-      const remainingMs = this.opts.blockingTimeoutSecs * 1000 - elapsedMs - marginMs;
-      if (remainingMs <= 0) {
+      // Every call to getNextJob blocks for bullWorkerBlockingTimeoutSecs. We can't block exactly
+      // blockingTimeoutSecs, but we can prevent another blocking cycle when we have almost finished
+      // waiting.
+      const marginMs = this.opts.pollingDelayMs;
+      const remainingMs = this.opts.blockingTimeoutSecs * 1000 - elapsedMs;
+      if (iteration !== 0 && remainingMs - marginMs <= 0) {
         break;
       }
-      if (this.opts.fallback && block) {
-        await timeout(fallbackDelayMs);
+      if (polling && block) {
+        await timeout(Math.min(remainingMs, this.opts.pollingDelayMs));
       }
       const bullJob = await this.worker.getNextJob(token, {
-        block: !!block && !this.opts.fallback
+        block: !!block && !polling
       });
       if (!bullJob) {
         if (!block) {
@@ -174,11 +189,12 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
       const jobId = bullJob.id;
       if (jobId == undefined) {
         this.opts.logger.error({
-          queue: this.opts.queue
-        }, 'get next job: job has no id');
+          queue: this.opts.queue,
+          iteration,
+        }, 'acquire job: job has no id');
         await bullJob.moveToCompleted({
           type: 'error',
-          reason: 'get next job: job has no id'
+          reason: 'acquire job: job has no id'
         }, token, false);
         continue;
       }
@@ -188,19 +204,27 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
         this.opts.logger.warn({
           jobId,
           queue: this.opts.queue,
-        }, `get next job: missing job data, probably timed out`);
+          iteration,
+        }, `acquire job: missing job data, probably timed out`);
         await this.completeJob({
           token,
           jobId,
-          result: { type: 'error', reason: 'get next job: missing job data' }
+          result: { type: 'error', reason: 'acquire job: missing job data' }
         });
         continue;
       }
       input = unpack(buffer) as Input;
-      this.opts.logger.info({ jobId, queue: this.opts.queue }, `get next job: processing job`);
-      return { ...bullJob.data.job, input } satisfies JobData<Input, Meta>;
+      this.opts.logger.info({
+        jobId,
+        queue: this.opts.queue,
+        iteration
+      }, `acquire job: processing job`);
+      return {
+        data: { ...bullJob.data.job, input } satisfies JobData<Input, Meta>,
+        childDataKeys: bullJob.data.childDataKeys
+      };
     }
-    return undefined;
+    return { data: undefined };
   }
 
   async updateJob({ token, jobId, progressInfo, lockTimeoutMs, input }: {
@@ -218,7 +242,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
       }, 'publish status: job not found');
       throw Error('update status: job not found');
     }
-    void bullJob.extendLock(token, lockTimeoutMs ?? this.opts.lockTimeoutMs);
+    await bullJob.extendLock(token, lockTimeoutMs ?? this.opts.lockTimeoutMs);
     if (progressInfo != undefined) {
       await this.publishStatus(bullJob.data.dataKey, {
         jobId,
@@ -286,7 +310,7 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
     // cleanup
     await deleteKeys(this.redis, [
       `jobs:input:${bullJob.data.dataKey}`,
-      ...Object.keys(bullJob.data.childDataKeys ?? []).map((dataKey) => `jobs:result:${dataKey}`)
+      ...Object.keys(bullJob.data.childDataKeys ?? {}).map((dataKey) => `jobs:result:${dataKey}`)
     ]);
   }
 
@@ -371,8 +395,8 @@ export class BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
   }
 }
 
-export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements JobQueueEngine<Input, Output, Meta, ProgressInfo> {
-  private queues: Record<string, BullMqJobQueue<Input, Output, Meta, ProgressInfo>> = {};
+export class BullMqJobQueueEngine implements JobQueueEngine {
+  private queues: Record<string, BullMqJobQueue> = {};
   private redis: Redis;
   private subRedis: Redis;
   private opts: Opts;
@@ -383,28 +407,31 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
       blockingTimeoutSecs: 8,
       statusNotifierRepeatMs: 2000,
       concurrency: 1,
-      fallback: false,
+      polling: false,
       logger: defaultLogger,
       maximumWaitTimeoutMs: 60*60*24*365*1000,
+      bullWorkerBlockingTimeoutSecs: 2,
+      pollingDelayMs: 200,
       ...opts,
     };
     this.redis = (opts.redisConnection ?? defaultRedisConnection)(); 
     this.subRedis = (opts.redisConnection ?? defaultRedisConnection)(); 
   }
 
-  private getQueue(queue: string): BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
-    if (!this.queues[queue]) {
-      this.queues[queue] = new BullMqJobQueue<Input, Output, Meta, ProgressInfo>({
+  private getQueue<Input, Output, Meta, ProgressInfo>(queue: string): BullMqJobQueue<Input, Output, Meta, ProgressInfo> {
+    let bullQueue = this.queues[queue];
+    if (!bullQueue) {
+      bullQueue = this.queues[queue] = new BullMqJobQueue({
         ...this.opts,
         queue,
         redis: this.redis,
       });
     }
-    return this.queues[queue];
+    return bullQueue as BullMqJobQueue<Input, Output, Meta, ProgressInfo>;
   }
 
-  async submitJob(opts: {
-    data: JobData<Input, Meta>,
+  async submitJob<Meta, ProgressInfo>(opts: {
+    data: JobData<unknown, Meta>,
     queue: string,
     parentId?: string,
     parentQueue?: string,
@@ -418,7 +445,7 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     await this.getQueue(opts.queue).submitJob({ ...opts, dataKey });
   }
 
-  async subscribeToJobStatus(opts: {
+  async subscribeToJobStatus<Meta, ProgressInfo>(opts: {
     jobId: string,
     queue: string,
     statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void
@@ -430,7 +457,7 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     return this.subscribeToJobStatusWithDataKey(bullJob.data.dataKey, opts.statusHandler);
   }
 
-  private async subscribeToJobStatusWithDataKey(
+  private async subscribeToJobStatusWithDataKey<Meta, ProgressInfo>(
     dataKey: string,
     statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void
   ): Promise<() => Promise<void>> {
@@ -442,7 +469,7 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
       const channelString = channel.toString();
       if (channelString === subscriptionKey) {
         const status = unpack(payload) as JobStatus<Meta, ProgressInfo>;
-        if (isResultStatus(status.type)) {
+        if (isResultStatusType(status.type)) {
           unsub();
         }
         statusHandler(status);
@@ -457,18 +484,34 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     return unsub;
   }
 
-  async acquireJob(opts: {
+  async acquireJob<Input, Meta, ChildOutput>(opts: {
     queue: string,
     token: string,
     block?: boolean
-  }): Promise<JobData<Input, Meta> | undefined> {
-    return await this.getQueue(opts.queue).acquireJob({
+  }): Promise<{ data: JobData<Input, Meta> | undefined, childResults?: Record<string, JobResult<ChildOutput>> }> {
+    const { data, childDataKeys } = await this.getQueue(opts.queue).acquireJob({
       token: opts.token,
       block: opts.block
     });
+    if (!data) {
+      return { data };
+    }
+    if (!childDataKeys) {
+      return { data: data as JobData<Input, Meta> };
+    }
+    const childResults = await this.submitChildrenSuspendParent<ChildOutput>({
+      children: [],
+      token: opts.token,
+      parentId: data.id,
+      parentQueue: opts.queue
+    })
+    if (!childResults) {
+      return { data: undefined };
+    }
+    return { data: data as JobData<Input, Meta>, childResults };
   }
 
-  async completeJob(opts: {
+  async completeJob<Output>(opts: {
     queue: string,
     token: string,
     jobId: string,
@@ -482,13 +525,13 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     token: string,
     jobId: string,
     lockTimeoutMs?: number,
-    progressInfo?: ProgressInfo,
-    input?: Input,
+    progressInfo?: unknown,
+    input?: unknown,
   }): Promise<{ interrupt: boolean }> {
     return await this.getQueue(opts.queue).updateJob(opts);
   }
 
-  async getJobResult(opts: { resultKey: string, delete?: boolean }): Promise<JobResult<Output>> {
+  async getJobResult<Output>(opts: { resultKey: string, delete?: boolean }): Promise<JobResult<Output>> {
     const buffer = (
       opts.delete
         ? await this.redis.getdelBuffer(`jobs:result:${opts.resultKey}`)
@@ -503,9 +546,12 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     return unpack(buffer) as JobResult<Output>;
   }
 
-  private async getChildResults(opts: { childDataKeys: Record<string, string>, delete?: boolean }) {
+  private async getChildResults<Output>(opts: { childDataKeys: Record<string, string>, delete?: boolean }) {
     let request = this.redis.multi();
     const entries = Object.entries(opts.childDataKeys);
+    if (entries.length === 0) {
+      return {};
+    }
     for (const [_childId, dataKey] of entries) {
       request = (
         opts.delete
@@ -523,56 +569,75 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
     return mapValues(resultMap, (buffer) => unpack(buffer!) as JobResult<Output>);
   }
 
+  private async deleteChildResults(childDataKeys: Record<string, string>) {
+    await deleteKeys(this.redis, [
+      ...Object.keys(childDataKeys).map((dataKey) => `jobs:result:${dataKey}`)
+    ]);
+  }
+
   // TODO separate getChildResults from submitChildrenSuspendParent
-  async submitChildrenSuspendParent(opts: { 
-    children: { data: JobData<Input, Meta>, queue: string }[], 
+  async submitChildrenSuspendParent<ChildOutput>(opts: { 
+    children: { data: JobData<unknown>, queue: string }[], 
     token: string,
     parentId: string,
     parentQueue: string,
-  }): Promise<Record<string, JobResult<unknown>> | undefined> {
-    const bullJob = await this.getQueue(opts.parentQueue)._getBullQueue()?.getJob(opts.parentId);
-    if (!bullJob) {
+  }): Promise<Record<string, JobResult<ChildOutput>> | undefined> {
+
+    const parentBullJob = await this.getQueue(opts.parentQueue)._getBullQueue()?.getJob(opts.parentId);
+    if (!parentBullJob) {
       throw Error('parent job not found');
     }
 
-    const childDataKeys = Object.fromEntries(
-      opts.children.map(({ data: { id } } ) => [id, `${bullJob.data.dataKey}:child:${id}`])
+    const childDataKeys = (
+      opts.children.length === 0
+        ? parentBullJob.data.childDataKeys ?? {}
+        : Object.fromEntries(opts.children.map(
+          ({ data: { id } } ) => [id, `${parentBullJob.data.dataKey}:child:${id}`]
+        ))
     );
 
-    if (isSubset(childDataKeys, bullJob.data.childDataKeys ?? {})) {
-      const childResults = await this.getChildResults({ childDataKeys });
+    if (isSubset(childDataKeys, parentBullJob.data.childDataKeys ?? {})) {
+      // children were already submitted previously, check to see whether we have results
+      const childResults = await this.getChildResults<ChildOutput>({ childDataKeys });
       if (childResults) {
+        await Promise.all([
+          parentBullJob.updateData({ ...parentBullJob.data, childDataKeys: undefined }),
+          this.deleteChildResults(childDataKeys)
+        ]);
         return childResults;
       }
-      const shouldWait = await bullJob.moveToWaitingChildren(opts.token);
+      // we don't have all results, suspend parent again
+      const shouldWait = await parentBullJob.moveToWaitingChildren(opts.token);
       if (shouldWait) {
         return undefined;
       }
       this.opts.logger.warn({
         parentId: opts.parentId,
-        parentQueue: bullJob.queueQualifiedName,
+        parentQueue: parentBullJob.queueQualifiedName,
         childrenCount: opts.children.length
       }, 'continue parent: parent job has existing childDataKeys but children are not running, retrying');
     }
 
+    // submit all children
     await Promise.all(opts.children.map((child) => {
       const dataKey = childDataKeys[child.data.id];
       assert(dataKey);
       this.submitJob({
         ...child,
         parentId: opts.parentId,
-        parentQueue: bullJob.queueQualifiedName,
+        parentQueue: parentBullJob.queueQualifiedName,
         dataKey,
       });
     }));
 
-    await bullJob.updateData({
-      ...bullJob.data,
-      childDataKeys: { ...bullJob.data.childDataKeys, ...childDataKeys },
+    await parentBullJob.updateData({
+      ...parentBullJob.data,
+      childDataKeys: childDataKeys,
     });
-    const shouldWait = await bullJob.moveToWaitingChildren(opts.token);
+
+    const shouldWait = await parentBullJob.moveToWaitingChildren(opts.token);
     if (!shouldWait) {
-      const childResults = await this.getChildResults({ childDataKeys });
+      const childResults = await this.getChildResults<ChildOutput>({ childDataKeys });
       if (!childResults) {
         this.opts.logger.error({
           parentId: opts.parentId,
@@ -581,6 +646,10 @@ export class BullMqJobQueueEngine<Input, Output, Meta, ProgressInfo> implements 
         }, 'suspending parent: children are done but outputs are missing');
         throw Error('suspending parent: children are done but outputs are missing');
       }
+      await Promise.all([
+        parentBullJob.updateData({ ...parentBullJob.data, childDataKeys: undefined }),
+        this.deleteChildResults(childDataKeys)
+      ]);
       return childResults;
     }
 
