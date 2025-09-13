@@ -610,12 +610,18 @@ export class BullMqJobQueueEngine implements JobQueueEngine {
       const shouldWait = await parentBullJob.moveToWaitingChildren(opts.token);
       if (shouldWait) {
         return undefined;
+      } else {
+        const childResults = await this.getChildResults<ChildOutput>({ childDataKeys });
+        if (!childResults) {
+          this.opts.logger.error({
+            parentId: opts.parentId,
+            parentQueue: opts.parentQueue,
+            childrenCount: opts.children.length
+          }, 'suspending parent: children are done but outputs are missing');
+          throw Error('suspending parent: children are done but outputs are missing');
+        }
+        return childResults;
       }
-      this.opts.logger.warn({
-        parentId: opts.parentId,
-        parentQueue: parentBullJob.queueQualifiedName,
-        childrenCount: opts.children.length
-      }, 'continue parent: parent job has existing childDataKeys but children are not running, retrying');
     }
 
     // submit all children

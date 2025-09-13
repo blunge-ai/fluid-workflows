@@ -61,3 +61,36 @@ test('run child workflow', async () => {
 
   expect(result.output).toBe('output(child(input(XX)))');
 });
+
+test('run two named children', async () => {
+  const { dispatcher, runner, queue } = setup();
+
+  const child1 = Workflow
+    .create<{ a: number }>({ name: 'child1', version: 1 })
+    .step(async ({ a }) => {
+      return { a2: a * 2 };
+    });
+
+  const child2 = Workflow
+    .create<{ s: string }>({ name: 'child2', version: 1 })
+    .step(async ({ s }) => {
+      return { s2: `child2(${s})` };
+    });
+
+  const parent = Workflow
+    .create<{ n: number }>({ name: 'parent-two-children', version: 1 })
+    .step(async ({ n }) => {
+      return { one: { a: n + 1 }, two: { s: `n=${n}` } };
+    })
+    .childStep({ one: child1, two: child2 })
+    .step(async ({ one, two }) => {
+      return { out: `${one.a2}-${two.s2}` };
+    });
+
+  const stop = runner.run(queue, [parent, child1, child2]);
+  const result = await dispatcher.dispatchAwaitingOutput(parent, { n: 5 });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  await stop();
+
+  expect(result.out).toBe('12-child2(n=5)');
+});

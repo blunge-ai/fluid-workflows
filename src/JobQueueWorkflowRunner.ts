@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowRunOptions, StepFn } from './Workflow';
+import { Workflow, WorkflowRunOptions } from './Workflow';
 import type { JobQueueEngine, JobData, JobResult } from './JobQueueEngine';
 import { timeout, assertNever, assert, Logger, defaultLogger } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
@@ -10,7 +10,7 @@ export type Opts = {
 
 export type ConstructorOpts = Partial<Opts>;
 
-function findWorkflow(workflows: Workflow<unknown, unknown>[], jobData: WorkflowJobData) {
+function findWorkflow(workflows: Workflow<any, any>[], jobData: WorkflowJobData) {
   const { name, version, totalSteps, step } = jobData;
   if (step >= totalSteps) {
     throw Error(`inconsistent jobData: current step is ${step} but expected value smaller than ${totalSteps}`);
@@ -69,35 +69,47 @@ export class JobQueueWorkflowRunner {
     } satisfies WorkflowRunOptions;
 
     for (const step of steps) {
-      if (step instanceof Workflow) {
+      if (typeof step === 'function' && !(step instanceof Workflow)) {
+        // step function
+        result = await step(result, runOptions);
+      } else {
+        const entries = (
+          step instanceof Workflow
+            ? [['', step]] satisfies [string, Workflow<unknown, unknown>][]
+            : Object.entries(step as Record<string, Workflow<unknown, unknown>>)
+        );
+        const childJobs = entries.map(([key, childWorkflow]) => ({
+          id: `${job.id}:step:${stepIndex}:child:${key}`,
+          input: makeWorkflowJobData({
+            props: childWorkflow,
+            input: key === '' ? result : (result as Record<string, unknown>)[key]
+          }),
+          meta: undefined,
+        }));
         if (!childResults) {
-          const childWorkflow = step as Workflow<unknown, unknown>;
-          const childJob = {
-            id: `${childWorkflow.name}-${uuidv4()}`,
-            input: makeWorkflowJobData({ props: childWorkflow, input: result as unknown }),
-            meta: undefined,
-          };
           const maybeResults = await this.engine.submitChildrenSuspendParent<unknown>({
             token,
-            children: [{ data: childJob, queue }],
+            children: childJobs.map((data) => ({ data, queue })),
             parentId: job.id,
-            parentQueue: queue
+            parentQueue: queue,
           });
           if (!maybeResults) {
             return [undefined, 'suspended'];
           }
           childResults = maybeResults;
         }
-        const childResult = Object.values(childResults)[0];
-        assert(childResult);
-        childResults = undefined; // valid only for the first step
-        if (childResult.type !== 'success') {
-          // TODO handle cancel
-          throw Error('error running child job');
-        }
-        result = childResult.output;
-      } else {
-        result = await step(result, runOptions);
+        // unwrap results
+        const outputs = Object.fromEntries(entries.map(([key]) => {
+          assert(childResults);
+          const childResult = childResults[`${job.id}:step:${stepIndex}:child:${key}`];
+          assert(childResult);
+          if (childResult.type !== 'success') {
+            throw Error('error running child job');
+          }
+          return [key, childResult.output];
+        }));
+        childResults = undefined; // only valid for the first iteration
+        result = step instanceof Workflow ? outputs[''] : outputs;
       }
 
       stepIndex += 1;
@@ -110,7 +122,7 @@ export class JobQueueWorkflowRunner {
     return [result as Output, 'success'];
   }
 
-  run(queue: string, workflows: Workflow<unknown, unknown>[]) {
+  run(queue: string, workflows: Workflow<any, any>[]) {
     let stop = false;
     const token = uuidv4();
     const workerPromise = (async () => {
