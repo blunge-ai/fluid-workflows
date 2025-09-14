@@ -3,7 +3,6 @@ import { Workflow, WorkflowRunOptions, WorkflowNames } from './Workflow';
 import type { JobQueueEngine, JobData, JobResult } from './JobQueueEngine';
 import { timeout, assertNever, assert, Logger, defaultLogger } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
-import pick from 'lodash/pick';
 
 export type Opts = {
   logger: Logger,
@@ -84,6 +83,10 @@ export class JobQueueWorkflowRunner {
     let stepIndex = job.input.step;
     const steps = workflow.steps.slice(stepIndex);
     let result: unknown = job.input.input;
+
+    if (stepIndex === 0 && workflow.inputSchema) {
+      result = workflow.inputSchema.parse(result);
+    }
 
     const runOptions = {
       progress: async (phase: string, progress: number) => {

@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest'
+import { z } from 'zod';
 import { Workflow } from '~/Workflow';
 import { InMemoryWorkflowRunner } from '~/InMemoryWorkflowRunner';
 
@@ -38,4 +39,19 @@ test('run child workflow', async () => {
   const result = await runner.run(workflow, { inputString: 'XX' });
 
   expect(result.output).toBe('output(child(input(XX)))');
+});
+
+test('zod input schema', async () => {
+  const runner = new InMemoryWorkflowRunner();
+  const schema = z.object({ a: z.number(), b: z.number() });
+
+  const workflow = Workflow
+    .create({ name: 'sum-with-zod', version: 1, inputSchema: schema })
+    .step(async (input) => {
+      const { a, b } = input;
+      return { sum: a + b };
+    });
+
+  const result = await runner.run(workflow, { a: 2, b: 3 });
+  expect(result.sum).toBe(5);
 });

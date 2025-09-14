@@ -3,6 +3,11 @@ import { Workflow, WorkflowRunOptions, StepFn } from './Workflow';
 export class InMemoryWorkflowRunner {
   async run<Input, Output>(workflow: Workflow<Input, Output>, input: Input) {
     let result: unknown = input;
+
+    if (workflow.inputSchema) {
+      result = workflow.inputSchema.parse(result);
+    }
+
     const runOptions = {
       progress: async (phase: string, progress: number) => {
         console.log(`phase: ${phase}, progress: ${progress}`);
@@ -15,8 +20,8 @@ export class InMemoryWorkflowRunner {
       } else if (typeof step === 'function') {
         result = await step(result, runOptions);
       } else {
-        const children = step as Record<string | number | symbol, Workflow<unknown, unknown>>;
-        const inputRecord = result as Record<string | number | symbol, unknown>;
+        const children = step as Record<string, Workflow<unknown, unknown>>;
+        const inputRecord = result as Record<string, unknown>;
         const entries = Object.entries(children);
         const outputs = await Promise.all(entries.map(([key, child]) => this.run(child, inputRecord[key])));
         result = Object.fromEntries(entries.map(([key], i) => [key, outputs[i]]));
