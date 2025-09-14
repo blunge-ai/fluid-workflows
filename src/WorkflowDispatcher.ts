@@ -7,24 +7,49 @@ import { Logger, defaultLogger, assert } from './utils';
 
 export type Opts = {
   logger: Logger,
-  queue: string,
+  queue?: string,
 };
 
-export type ConstructorOpts
- = Partial<Opts>
- & Pick<Opts, 'queue'>;
+type WorkflowsArray = ReadonlyArray<Workflow<any, any, any>>;
+type NamesOf<A extends WorkflowsArray> = A[number] extends infer U
+  ? U extends Workflow<any, any, infer N> ? N : never
+  : never;
 
-export class WorkflowDispatcher {
+type RequireExactKeys<TObj, K extends PropertyKey> = Exclude<keyof TObj, K> extends never
+  ? (Exclude<K, keyof TObj> extends never ? TObj : never)
+  : never;
+
+export type ConstructorOpts<A extends WorkflowsArray>
+ = Partial<Opts>
+ & { queues?: RequireExactKeys<Record<NamesOf<A>, string>, NamesOf<A>> };
+
+export class WorkflowDispatcher<A extends WorkflowsArray> {
   private opts: Opts;
+  private queues?: Record<string, string>;
 
   constructor(
     private engine: JobQueueEngine,
-    opts: ConstructorOpts,
+    private workflows: A,
+    opts?: ConstructorOpts<A>,
   ) {
     this.opts = {
       logger: defaultLogger,
       ...opts,
     };
+    this.queues = opts?.queues as Record<string, string> | undefined;
+  }
+
+  private findWorkflowByProps(props: WorkflowProps): Workflow<any, any, any> | undefined {
+    return this.workflows.find(w => w.name === props.name && w.version === props.version && w.steps.length === props.numSteps);
+  }
+
+  private queueFor(props: WorkflowProps, override?: string): string {
+    const wf = this.findWorkflowByProps(props);
+    const q = override ?? (this.queues && this.queues[props.name]) ?? wf?.queue ?? this.opts.queue;
+    if (!q) {
+      throw Error('dispatcher: queue not specified');
+    }
+    return q;
   }
 
   async dispatch<Input, Meta = unknown>(
@@ -33,7 +58,11 @@ export class WorkflowDispatcher {
     opts?: { jobId?: string, queue?: string, meta?: Meta },
   ) {
     const jobId = opts?.jobId ?? `${props.name}-${uuidv4()}`;
-    const queue = opts?.queue ?? props.queue ?? this.opts.queue;
+    const wf = this.findWorkflowByProps(props);
+    if (!wf) {
+      throw Error(`dispatcher: no workflow found for '${props.name}' version ${props.version}`);
+    }
+    const queue = this.queueFor(props, opts?.queue);
     const workflowInput = {
       name: props.name,
       version: props.version,
@@ -48,16 +77,21 @@ export class WorkflowDispatcher {
   }
   
   async dispatchAwaitingOutput<Input, Output, Meta>(
-    props: Workflow<Input, Output>,
+    props: Workflow<Input, Output, any>,
     input: Input,
     opts?: { jobId?: string, queue?: string, meta?: Meta },
   ) {
+    const wfProps: WorkflowProps = { name: props.name, version: props.version, numSteps: props.numSteps, queue: props.queue };
+    const wf = this.findWorkflowByProps(wfProps);
+    if (!wf) throw Error(`dispatcher: no workflow found for '${props.name}' version ${props.version}`);
+
     const jobId = opts?.jobId ?? `${props.name}-${uuidv4()}`;
-    const queue = opts?.queue ?? props.queue ?? this.opts.queue;
+    const queue = this.queueFor(wfProps, opts?.queue);
     const workflowInput = makeWorkflowJobData({ props, input });
 
+    let submitPromise: Promise<unknown> | undefined;
     const resultStatusPromise = new Promise<JobResultStatus<unknown>>((resolve) => {
-      this.engine.submitJob({
+      submitPromise = this.engine.submitJob({
         data: { id: jobId, input: workflowInput, meta: opts?.meta },
         queue,
         statusHandler: (status) => {
@@ -67,6 +101,7 @@ export class WorkflowDispatcher {
         }
       });
     });
+    await submitPromise;
     const resultStatus = await resultStatusPromise;
     if (resultStatus.type !== 'success') {
       this.opts.logger.error({ resulType: resultStatus.type, queue }, 'run: job unsuccessful');

@@ -6,7 +6,8 @@
   "scripts": {
     "tsc": "tsc",
     "lint": "eslint",
-    "test": "vitest --config ./vitest.config.ts"
+    "test-watch": "vitest --config ./vitest.config.ts",
+    "test": "vitest --config ./vitest.config.ts --run"
   },
   "description": "",
   "devDependencies": {

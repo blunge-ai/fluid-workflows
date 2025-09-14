@@ -101,7 +101,7 @@ export class BullMqJobQueue<Input = unknown, Output = unknown, Meta = unknown, P
           blockingTimeoutSecs: this.opts.bullWorkerBlockingTimeoutSecs,
         }
       );
-      this.startMaintenanceWorkers();
+      void this.startMaintenanceWorkers();
     }
     return this._worker;
   }
@@ -276,7 +276,7 @@ export class BullMqJobQueue<Input = unknown, Output = unknown, Meta = unknown, P
       ...result,
       output: undefined
     } as JobResult<Output | undefined>;
-    this.redis.set(`jobs:result:${bullJob.data.dataKey}`, pack(result), 'PX', this.opts.maximumWaitTimeoutMs)
+    await this.redis.set(`jobs:result:${bullJob.data.dataKey}`, pack(result), 'PX', this.opts.maximumWaitTimeoutMs)
     if (result.type === 'error') {
       this.opts.logger.info({
         jobId,
@@ -470,7 +470,7 @@ export class BullMqJobQueueEngine implements JobQueueEngine {
       if (channelString === subscriptionKey) {
         const status = unpack(payload) as JobStatus<Meta, ProgressInfo>;
         if (isResultStatusType(status.type)) {
-          unsub();
+          void unsub();
         }
         statusHandler(status);
       }

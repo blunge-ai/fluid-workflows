@@ -115,7 +115,7 @@ export class JobQueueWorkflowRunner {
             : Object.entries(step as Record<string, Workflow<unknown, unknown>>)
         );
         const childrenPayload = entries.map(([key, childWorkflow]) => {
-          const childQueue = queues ? queues[childWorkflow.name] : childWorkflow.queue;
+          const childQueue = (queues && (queues[key] ?? queues[childWorkflow.name])) ?? childWorkflow.queue ?? queue;
           if (!childQueue) {
             throw Error(`missing queue for child workflow: ${childWorkflow.name}`);
           }
@@ -167,7 +167,7 @@ export class JobQueueWorkflowRunner {
     return [result as Output, 'success'];
   }
 
-  run<W extends Workflow<any, any, any>, Q extends Record<WorkflowNames<W>, string>>(workflow: W, opts?: { queue?: string, queues?: RequireExactKeys<Q, WorkflowNames<W>> }) {
+  run<W extends Workflow<any, any, any>>(workflow: W, opts?: { queue?: string, queues?: RequireExactKeys<Record<WorkflowNames<W>, string>, WorkflowNames<W>> }) {
     const queuesMap = opts?.queues as Record<string, string> | undefined;
     const queue = opts?.queue ?? (queuesMap && queuesMap?.[workflow.name]) ?? workflow.queue;
     if (!queue) {
@@ -179,12 +179,16 @@ export class JobQueueWorkflowRunner {
     const workerPromise = (async () => {
       process.on('SIGTERM', () => {
         this.opts.logger.warn({
-          queue, workflow: pick(workflow, ['name', 'version'])
+          queue,
+          workflowName: workflow.name,
+          workflowVersion: workflow.version,
         }, 'workflow runner: sigterm received; trying to stop gracefully');
         stop = true;
       });
       this.opts.logger.info({
-        queue, workflow: pick(workflow, ['name', 'version'])
+        queue,
+        workflowName: workflow.name,
+        workflowVersion: workflow.version,
       }, `workflow runner: started`);
       while (!stop) {
         try {
@@ -206,7 +210,9 @@ export class JobQueueWorkflowRunner {
               }
             } catch (err) {
               this.opts.logger.error({
-                err, queue, workflow: pick(workflow, ['name', 'version'])
+                err, queue,
+                workflowName: workflow.name,
+                workflowVersion: workflow.version,
               }, 'workflow runner: exception occured when running workflow');
               const reason = `exception when running workflow: ${new String(err)}`;
               await this.engine.completeJob({ queue, token, jobId, result: { type: 'error', reason } });
@@ -214,13 +220,17 @@ export class JobQueueWorkflowRunner {
           }
         } catch (err) {
           this.opts.logger.error({
-            err, queue, workflow: pick(workflow, ['name', 'version'])
+            err, queue,
+            workflowName: workflow.name,
+            workflowVersion: workflow.version,
           }, 'workflow runner: exception occured while running worker loop; sleeping 1s before continuing');
           await timeout(1000);
         }
       }
       this.opts.logger.info({
-        queue, workflow: pick(workflow, ['name', 'version'])
+        queue,
+        workflowName: workflow.name,
+        workflowVersion: workflow.version,
       }, `workflow runner: stopped`);
     })();
     return async () => {

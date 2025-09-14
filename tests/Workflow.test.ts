@@ -6,8 +6,8 @@ test('run step', async () => {
   const runner = new InMemoryWorkflowRunner();
 
   const workflow = Workflow
-    .create<{ a: number, b: number }>({ name: 'add-a-and-b', version: 1 })
-    .step<{ c: number }>(async ({ a, b }) => {
+    .create({ name: 'add-a-and-b', version: 1 })
+    .step(async ({ a, b }) => {
       return { c: a + b };
     });
 
@@ -20,13 +20,13 @@ test('run child workflow', async () => {
   const runner = new InMemoryWorkflowRunner();
 
   const child = Workflow
-    .create<{ childInput: string }>({ name: 'child-workflow', version: 1 })
+    .create({ name: 'child-workflow', version: 1 })
     .step(async ({ childInput }) => {
       return { childOutput: `child(${childInput})` };
     });
 
   const workflow = Workflow
-    .create<{ inputString: string }>({ name: 'parent-workflow', version: 1 })
+    .create({ name: 'parent-workflow', version: 1 })
     .step(async ({ inputString }) => {
       return { childInput: `input(${inputString})` };
     })
