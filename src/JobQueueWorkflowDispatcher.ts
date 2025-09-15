@@ -1,37 +1,32 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowProps, WorkflowNames, findWorkflow, collectWorkflows } from './Workflow';
+import { Workflow, WorkflowProps, findWorkflow, collectWorkflows } from './Workflow';
 import { WorkflowJobData, makeWorkflowJobData } from './WorkflowJob';
 import type { JobQueueEngine, JobResultStatus } from './JobQueueEngine';
 import { isResultStatus } from './JobQueueEngine';
 import { Logger, defaultLogger, assert } from './utils';
+import { WorkflowsArray, NamesOf, QueuesOption } from './typeHelpers';
 
 export type Opts = {
   logger: Logger,
 };
 
-type WorkflowsArray<Names extends string> = Workflow<any, any, Names>[];
+type ConstructorOpts<Wfs extends WorkflowsArray<Names>, Names extends string, Qs extends Record<NamesOf<Wfs, Names>, string>>
+  = Partial<Opts>
+  & QueuesOption<Wfs, Names, Qs>;
 
-type RequireExactKeys<TObj, K extends PropertyKey> = Exclude<keyof TObj, K> extends never
-  ? (Exclude<K, keyof TObj> extends never ? TObj : never)
-  : never;
-
-type NamesOf<A extends WorkflowsArray<Names>, Names extends string> = A[number] extends infer U
-  ? U extends Workflow<any, any, infer N> ? N : never
-  : never;
-
-export type ConstructorOpts<A extends WorkflowsArray<Names>, Names extends string, Q extends string>
- = Partial<Opts>
- & { queues: RequireExactKeys<Record<NamesOf<A, Names>, Q>, NamesOf<A, Names>> };
-
-export class JobQueueWorkflowDispatcher<const Names extends string, A extends WorkflowsArray<Names>, const Q extends string> {
+export class JobQueueWorkflowDispatcher<
+  const Names extends string,
+  const Wfs extends WorkflowsArray<Names>,
+  const Qs extends Record<NamesOf<Wfs, Names>, string>
+> {
   private opts: Opts;
-  private queuesMap: Record<string, Q>;
+  private queuesMap: Record<string, string>;
   private allWorkflows: Workflow<any, any, any>[];
 
   constructor(
     private engine: JobQueueEngine,
-    workflows: A,
-    opts: ConstructorOpts<A, Names, Q>,
+    workflows: Wfs,
+    opts: ConstructorOpts<Wfs, Names, Qs>,
   ) {
     this.opts = {
       logger: defaultLogger,

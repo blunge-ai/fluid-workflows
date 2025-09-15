@@ -4,34 +4,29 @@ import type { JobQueueEngine, JobData, JobResult } from './JobQueueEngine';
 import { timeout, assertNever, assert, Logger, defaultLogger } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
 import type { WorkflowRunner } from './WorkflowRunner';
+import { WorkflowsArray, NamesOf, QueuesOption, ValueOf } from './typeHelpers';
 
 export type Opts = {
   logger: Logger,
 };
 
-type WorkflowsArray<Names extends string> = Workflow<any, any, Names>[];
-
-type RequireExactKeys<TObj, K extends PropertyKey> = Exclude<keyof TObj, K> extends never
-  ? (Exclude<K, keyof TObj> extends never ? TObj : never)
-  : never;
-
-type NamesOf<A extends WorkflowsArray<Names>, Names extends string> = A[number] extends infer U
-  ? U extends Workflow<any, any, infer N> ? N : never
-  : never;
-
-export type ConstructorOpts<A extends WorkflowsArray<Names>, Names extends string, Q extends string>
+type ConstructorOpts<Wfs extends WorkflowsArray<Names>, Names extends string, Qs extends Record<NamesOf<Wfs, Names>, string>>
   = Partial<Opts>
-  & { queues: RequireExactKeys<Record<NamesOf<A, Names>, Q>, NamesOf<A, Names>> };
+  & QueuesOption<Wfs, Names, Qs>;
 
-export class JobQueueWorkflowRunner<const Names extends string, A extends WorkflowsArray<Names>, const Q extends string> implements WorkflowRunner<Q> {
+export class JobQueueWorkflowRunner<
+  const Names extends string,
+  const Wfs extends WorkflowsArray<Names>,
+  const Qs extends Record<NamesOf<Wfs, Names>, string>
+> implements WorkflowRunner<ValueOf<Qs>> {
   private opts: Opts;
-  private queuesMap: Record<string, Q>;
+  private queuesMap: Record<string, string>;
   private allWorkflows: Workflow<any, any, any>[];
 
   constructor(
     private engine: JobQueueEngine,
-    workflows: A,
-    opts: ConstructorOpts<A, Names, Q>
+    workflows: Wfs,
+    opts: ConstructorOpts<Wfs, Names, Qs>
   ) {
     this.opts = {
       logger: defaultLogger,
@@ -49,7 +44,7 @@ export class JobQueueWorkflowRunner<const Names extends string, A extends Workfl
   async runSteps<Input, Output>(
     workflow: Workflow<Input, Output>,
     job: JobData<WorkflowJobData<Input>>,
-    queue: Q,
+    queue: string,
     token: string,
     childResults?: Record<string, JobResult<unknown>>,
   ): Promise<[Output | undefined, 'suspended' | 'success']>{
@@ -91,7 +86,7 @@ export class JobQueueWorkflowRunner<const Names extends string, A extends Workfl
             : Object.entries(step as Record<string, Workflow<unknown, unknown>>)
         );
         const childrenPayload = entries.map(([key, childWorkflow]) => {
-          const childQueue = this.queuesMap[childWorkflow.name as string];
+          const childQueue = this.queuesMap[childWorkflow.name];
           assert(childQueue, 'child queue not found');
           return {
             data: {
@@ -141,7 +136,7 @@ export class JobQueueWorkflowRunner<const Names extends string, A extends Workfl
     return [result as Output, 'success'];
   }
 
-  run(queues: 'all' | Q[]) {
+  run(queues: 'all' | ValueOf<Qs>[]) {
     const token = uuidv4();
     let stop = false;
     const allQueues = new Set(Object.values(this.queuesMap));
@@ -149,7 +144,7 @@ export class JobQueueWorkflowRunner<const Names extends string, A extends Workfl
     if (queues === 'all') {
       queueSet = allQueues;
     } else {
-      queueSet = new Set<Q>();
+      queueSet = new Set<ValueOf<Qs>>();
       for (const q of queues) {
         if (!allQueues.has(q)) {
           throw Error('must initialise runner with all queues that are to be run');
@@ -157,8 +152,8 @@ export class JobQueueWorkflowRunner<const Names extends string, A extends Workfl
         queueSet.add(q);
       }
     }
-    const queueList = Array.from(queueSet) as Q[];
-    const loops = queueList.map((queue: Q) => (async () => {
+    const queueList = Array.from(queueSet);
+    const loops = queueList.map((queue) => (async () => {
       this.opts.logger.info({ queue }, 'workflow runner: started');
       while (!stop) {
         try {
@@ -168,7 +163,7 @@ export class JobQueueWorkflowRunner<const Names extends string, A extends Workfl
             try {
               const workflow = findWorkflow(this.allWorkflows, job.input);
               validateWorkflowSteps(workflow, job.input);
-              const [output, status] = await this.runSteps(workflow, job as JobData<WorkflowJobData<any>>, queue, token, childResults);
+              const [output, status] = await this.runSteps(workflow, job, queue, token, childResults);
               if (status === 'suspended') {
                 continue;
               } else if (status === 'success') {

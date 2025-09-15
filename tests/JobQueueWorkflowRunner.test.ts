@@ -87,10 +87,14 @@ test('run two named children', async () => {
       return { out: `${one.a2}-${two.s2}` };
     });
 
+  const q = Workflow
+    .create({ name: 'q', version: 1 })
+    .step(async ({ n }) => ({ out: n }));
+
   const runner = new JobQueueWorkflowRunner(engine, [parent, child1, child2], { queues: { 'parent-two-children': 'z' as const, child1: 'y' as const, child2: 'x' as const } });
   const dispatcher = new JobQueueWorkflowDispatcher(engine, [parent, child1, child2], { queues: { 'parent-two-children': queue, child1: queue, child2: queue } as const });
   const stop = runner.run(['x', 'qq']);
-  const result = await dispatcher.dispatchAwaitingOutput(parent, { n: 5 });
+  const result = await dispatcher.dispatchAwaitingOutput(q, { n: 5 });
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();
 
