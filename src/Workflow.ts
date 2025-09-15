@@ -21,15 +21,12 @@ type ChildrenFor<Out>
   = { [K in keyof Out]: Workflow<Out[K], any, string> };
 
 type ExactChildren<Out, C extends ChildrenFor<Out>>
-  = Exclude<keyof C, keyof Out> extends never ? C : never;
+  = keyof C extends keyof Out ? C : never;
 
 type OutputsOfChildren<C>
-  = {[K in keyof C]: (
-      C[K] extends Workflow<unknown, any, string>
-        ? ( C[K] extends Workflow<unknown, infer O, string> ? O : never )
-        : never )};
+  = { [K in keyof C]: C[K] extends Workflow<unknown, infer O, string> ? O : never };
 
-type ChildrenNames<C> = Extract<keyof C, string>;
+type ChildrenNames<C> = keyof C & string;
 
 // Sentinel type for type-dispatching the first .step() which gives a Workflow its input
 declare const __WF_UNSET__: unique symbol;
