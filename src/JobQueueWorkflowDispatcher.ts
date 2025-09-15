@@ -1,23 +1,26 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowProps, findWorkflow, collectWorkflows } from './Workflow';
-import { WorkflowJobData, makeWorkflowJobData } from './WorkflowJob';
+import { Workflow, findWorkflow, collectWorkflows } from './Workflow';
+import { makeWorkflowJobData } from './WorkflowJob';
 import type { JobQueueEngine, JobResultStatus } from './JobQueueEngine';
 import { isResultStatus } from './JobQueueEngine';
 import { Logger, defaultLogger, assert } from './utils';
-import { WorkflowsArray, NamesOf, QueuesOption } from './typeHelpers';
+import { WfArray, NamesOfWfs, QueuesOption } from './typeHelpers';
 
 export type Opts = {
   logger: Logger,
 };
 
-type ConstructorOpts<Wfs extends WorkflowsArray<Names>, Names extends string, Qs extends Record<NamesOf<Wfs, Names>, string>>
+type ConstructorOpts<Wfs extends WfArray<Names>, Names extends string, Qs extends Record<NamesOfWfs<Wfs>, string>>
   = Partial<Opts>
   & QueuesOption<Wfs, Names, Qs>;
 
+type MatchingWorkflow<Wf, Names extends string>
+  = Wf extends Workflow<any, any, infer N> ? (Exclude<N, Names> extends never ? Wf : never) : never;
+
 export class JobQueueWorkflowDispatcher<
-  const Names extends NamesOf<Wfs, string>,
-  const Wfs extends WorkflowsArray<Names>,
-  const Qs extends Record<NamesOf<Wfs, Names>, string>
+  const Names extends NamesOfWfs<Wfs>,
+  const Wfs extends WfArray<Names>,
+  const Qs extends Record<NamesOfWfs<Wfs>, string>
 > {
   private opts: Opts;
   private queuesMap: Record<string, string>;
@@ -43,8 +46,8 @@ export class JobQueueWorkflowDispatcher<
     }
   }
 
-  async dispatch<const N extends Names, Input, Meta = unknown>(
-    props: Workflow<Input, any, N>,
+  async dispatch<N extends string, Input, Meta = unknown>(
+    props: MatchingWorkflow<Workflow<Input, any, N>, Names>,
     input: Input,
     opts?: { jobId?: string, meta?: Meta },
   ) {
@@ -62,8 +65,8 @@ export class JobQueueWorkflowDispatcher<
     });
   }
   
-  async dispatchAwaitingOutput<const N extends Names, Input, Output, Meta = unknown>(
-    props: Workflow<Input, Output, N>,
+  async dispatchAwaitingOutput<const N extends string, Input, Output, Meta = unknown>(
+    props: MatchingWorkflow<Workflow<Input, Output, N>, Names>,
     input: Input,
     opts?: { jobId?: string, meta?: Meta },
   ) {

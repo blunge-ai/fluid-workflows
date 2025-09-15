@@ -4,20 +4,20 @@ import type { JobQueueEngine, JobData, JobResult } from './JobQueueEngine';
 import { timeout, assertNever, assert, Logger, defaultLogger } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
 import type { WorkflowRunner } from './WorkflowRunner';
-import { WorkflowsArray, NamesOf, QueuesOption, ValueOf } from './typeHelpers';
+import { WfArray, NamesOfWfs, QueuesOption, ValueOf } from './typeHelpers';
 
 export type Opts = {
   logger: Logger,
 };
 
-type ConstructorOpts<Wfs extends WorkflowsArray<Names>, Names extends string, Qs extends Record<NamesOf<Wfs, Names>, string>>
+type ConstructorOpts<Wfs extends WfArray<Names>, Names extends string, Qs extends Record<NamesOfWfs<Wfs>, string>>
   = Partial<Opts>
   & QueuesOption<Wfs, Names, Qs>;
 
 export class JobQueueWorkflowRunner<
-  const Names extends NamesOf<Wfs, string>,
-  const Wfs extends WorkflowsArray<Names>,
-  const Qs extends Record<NamesOf<Wfs, Names>, string>
+  const Names extends NamesOfWfs<Wfs>,
+  const Wfs extends WfArray<Names>,
+  const Qs extends Record<NamesOfWfs<Wfs>, string>
 > implements WorkflowRunner<ValueOf<Qs>> {
   private opts: Opts;
   private queuesMap: Record<string, string>;
