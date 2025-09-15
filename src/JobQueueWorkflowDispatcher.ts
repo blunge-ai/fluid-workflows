@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowProps } from './Workflow';
+import { Workflow, WorkflowProps, WorkflowNames } from './Workflow';
 import { WorkflowJobData, makeWorkflowJobData } from './WorkflowJob';
 import type { JobQueueEngine, JobStatus, JobResultStatus } from './JobQueueEngine';
 import { isResultStatus } from './JobQueueEngine';
@@ -11,9 +11,7 @@ export type Opts = {
 };
 
 type WorkflowsArray = ReadonlyArray<Workflow<any, any, any>>;
-type NamesOf<A extends WorkflowsArray> = A[number] extends infer U
-  ? U extends Workflow<any, any, infer N> ? N : never
-  : never;
+type NamesOf<A extends WorkflowsArray> = WorkflowNames<A[number]>;
 
 type RequireExactKeys<TObj, K extends PropertyKey> = Exclude<keyof TObj, K> extends never
   ? (Exclude<K, keyof TObj> extends never ? TObj : never)
@@ -23,7 +21,7 @@ export type ConstructorOpts<A extends WorkflowsArray>
  = Partial<Opts>
  & { queues?: RequireExactKeys<Record<NamesOf<A>, string>, NamesOf<A>> };
 
-export class WorkflowDispatcher<A extends WorkflowsArray> {
+export class JobQueueWorkflowDispatcher<A extends WorkflowsArray> {
   private opts: Opts;
   private queues?: Record<string, string>;
 
