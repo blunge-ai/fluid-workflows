@@ -21,7 +21,7 @@ export type Opts = {
 
  export type ConstructorOpts<A extends WorkflowsArray>
   = Partial<Opts>
-  & { queues?: RequireExactKeys<Record<NamesOf<A>, string>, NamesOf<A>> };
+  & { queues: RequireExactKeys<Record<NamesOf<A>, string>, NamesOf<A>> };
 
 function collectWorkflows(root: Workflow<any, any>): Workflow<any, any>[] {
   const res: Workflow<any, any>[] = [];
@@ -76,14 +76,14 @@ export class JobQueueWorkflowRunner implements WorkflowRunner {
 
   constructor(
     private engine: JobQueueEngine,
-    private workflows: WorkflowsArray,
-    opts?: ConstructorOpts<WorkflowsArray>
+    workflows: WorkflowsArray,
+    opts: ConstructorOpts<WorkflowsArray>
   ) {
     this.opts = {
       logger: defaultLogger,
       ...opts,
     };
-    this.queuesMap = (opts?.queues as Record<string, string> | undefined) ?? {};
+    this.queuesMap = opts.queues;
 
     // collect all workflows (including children) and dedupe
     const collected = new Map<string, Workflow<any, any, any>>();
@@ -98,17 +98,11 @@ export class JobQueueWorkflowRunner implements WorkflowRunner {
     // derive queues to serve
     const queueSet = new Set<string>();
     for (const wf of this.allWorkflows) {
-      const q = this.queuesMap[wf.name] ?? wf.queue;
-      if (q) queueSet.add(q);
+      const queue = this.queuesMap[wf.name];
+      assert(queue, 'queue not found');
+      queueSet.add(queue);
     }
     this.queuesToServe = Array.from(queueSet);
-    if (this.queuesToServe.length === 0) {
-      throw Error('runner: no queues configured for any workflow');
-    }
-  }
-
-  private queueForWorkflow(wf: Workflow<any, any, any>, fallback: string): string {
-    return this.queuesMap[wf.name] ?? wf.queue ?? fallback;
   }
 
   async runSteps<Input, Output>(
@@ -156,10 +150,8 @@ export class JobQueueWorkflowRunner implements WorkflowRunner {
             : Object.entries(step as Record<string, Workflow<unknown, unknown>>)
         );
         const childrenPayload = entries.map(([key, childWorkflow]) => {
-          const childQueue = this.queueForWorkflow(childWorkflow, queue);
-          if (!childQueue) {
-            throw Error(`missing queue for child workflow: ${childWorkflow.name}`);
-          }
+          const childQueue = this.queuesMap[childWorkflow.name];
+          assert(childQueue, 'child queue not found');
           return {
             data: {
               id: `${job.id}:step:${stepIndex}:child:${key}`,

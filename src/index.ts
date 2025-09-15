@@ -1,9 +1,9 @@
 export {
  Workflow,
- executeQueueless,
+ runQueueless,
 } from './Workflow';
 export type {
- WorkflowProps as WorkflowOptions,
+ WorkflowProps,
  WorkflowRunOptions,
  ProgressFn,
  StepFn,
