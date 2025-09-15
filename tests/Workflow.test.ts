@@ -1,10 +1,9 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
-import { Workflow } from '~/Workflow';
-import { InMemoryWorkflowRunner } from '~/InMemoryWorkflowRunner';
+import { Workflow, executeQueueless } from '~/Workflow';
 
 test('run step', async () => {
-  const runner = new InMemoryWorkflowRunner();
+  // no runner needed for queueless execution
 
   const workflow = Workflow
     .create({ name: 'add-a-and-b', version: 1 })
@@ -12,13 +11,13 @@ test('run step', async () => {
       return { c: a + b };
     });
 
-  const result = await runner.run(workflow, { a: 12, b: 34 });
+  const result = await executeQueueless(workflow, { a: 12, b: 34 });
 
   expect(result.c).toBe(46);
 });
 
 test('run child workflow', async () => {
-  const runner = new InMemoryWorkflowRunner();
+  // no runner needed for queueless execution
 
   const child = Workflow
     .create({ name: 'child-workflow', version: 1 })
@@ -36,13 +35,13 @@ test('run child workflow', async () => {
       return { output: `output(${childOutput})` };
     });
 
-  const result = await runner.run(workflow, { inputString: 'XX' });
+  const result = await executeQueueless(workflow, { inputString: 'XX' });
 
   expect(result.output).toBe('output(child(input(XX)))');
 });
 
 test('zod input schema', async () => {
-  const runner = new InMemoryWorkflowRunner();
+  // no runner needed for queueless execution
   const schema = z.object({ a: z.number(), b: z.number() });
 
   const workflow = Workflow
@@ -52,6 +51,6 @@ test('zod input schema', async () => {
       return { sum: a + b };
     });
 
-  const result = await runner.run(workflow, { a: 2, b: 3 });
+  const result = await executeQueueless(workflow, { a: 2, b: 3 });
   expect(result.sum).toBe(5);
 });

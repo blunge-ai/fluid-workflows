@@ -86,3 +86,33 @@ export class Workflow<Input = Unset, Output = Unset, const Names extends string 
     );
   }
 }
+
+export async function executeQueueless<Input, Output>(workflow: Workflow<Input, Output, any>, input: Input): Promise<Output> {
+  let result: unknown = input;
+
+  if (workflow.inputSchema) {
+    result = workflow.inputSchema.parse(result);
+  }
+
+  const runOptions = {
+    progress: async (phase: string, progress: number) => {
+      console.log(`phase: ${phase}, progress: ${progress}`);
+      return { interrupt: false };
+    },
+  } satisfies WorkflowRunOptions;
+
+  for (const step of workflow.steps) {
+    if (step instanceof Workflow) {
+      result = await executeQueueless(step as Workflow<unknown, unknown, any>, result);
+    } else if (typeof step === 'function') {
+      result = await step(result, runOptions);
+    } else {
+      const children = step as Record<string, Workflow<unknown, unknown, any>>;
+      const inputRecord = result as Record<string, unknown>;
+      const entries = Object.entries(children);
+      const outputs = await Promise.all(entries.map(([key, child]) => executeQueueless(child, inputRecord[key])));
+      result = Object.fromEntries(entries.map(([key], i) => [key, outputs[i]]));
+    }
+  }
+  return result as Output;
+}

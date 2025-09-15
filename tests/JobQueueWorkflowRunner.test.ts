@@ -12,12 +12,11 @@ function setup() {
     blockingTimeoutSecs: 0.1,
   });
   const queue = `queue-${uuidv4()}`;
-  const runner = new JobQueueWorkflowRunner(engine);
-  return { engine, runner, queue };
+  return { engine, queue };
 }
 
 test('run step', async () => {
-  const { engine, runner, queue } = setup();
+  const { engine, queue } = setup();
 
   const workflow = Workflow
     .create({ name: 'add-a-and-b', version: 1 })
@@ -25,8 +24,9 @@ test('run step', async () => {
       return { c: a + b };
     });
 
+  const runner = new JobQueueWorkflowRunner(engine, [workflow], { queues: { 'add-a-and-b': queue } });
   const dispatcher = new WorkflowDispatcher(engine, [workflow], { queue });
-  const stop = runner.run(workflow, { queue });
+  const stop = runner.run();
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 12, b: 34 });
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();
@@ -34,7 +34,7 @@ test('run step', async () => {
 });
 
 test('run child workflow', async () => {
-  const { engine, runner, queue } = setup();
+  const { engine, queue } = setup();
 
   const child = Workflow
     .create({ name: 'child-workflow', version: 1 })
@@ -52,13 +52,9 @@ test('run child workflow', async () => {
       return { output: `output(${childOutput})` };
     });
 
-  const queues = {
-    'parent-workflow': queue,
-    'child-workflow': queue
-  };
-
+  const runner = new JobQueueWorkflowRunner(engine, [workflow, child], { queues: { 'parent-workflow': queue, 'child-workflow': queue } });
   const dispatcher = new WorkflowDispatcher(engine, [workflow, child], { queue });
-  const stopParent = runner.run(workflow, { queues });
+  const stopParent = runner.run();
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { parentInput: 'XX' });
   await new Promise(resolve => setTimeout(resolve, 100));
   await stopParent();
@@ -67,7 +63,7 @@ test('run child workflow', async () => {
 });
 
 test('run two named children', async () => {
-  const { engine, runner, queue } = setup();
+  const { engine, queue } = setup();
 
   const child1 = Workflow
     .create({ name: 'child1', version: 1 })
@@ -91,8 +87,9 @@ test('run two named children', async () => {
       return { out: `${one.a2}-${two.s2}` };
     });
 
+  const runner = new JobQueueWorkflowRunner(engine, [parent, child1, child2], { queues: { 'parent-two-children': queue, child1: queue, child2: queue } });
   const dispatcher = new WorkflowDispatcher(engine, [parent, child1, child2], { queue });
-  const stop = runner.run(parent, { queue });
+  const stop = runner.run();
   const result = await dispatcher.dispatchAwaitingOutput(parent, { n: 5 });
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();

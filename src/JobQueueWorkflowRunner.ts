@@ -1,18 +1,27 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowRunOptions, WorkflowNames } from './Workflow';
+import { Workflow, WorkflowRunOptions } from './Workflow';
 import type { JobQueueEngine, JobData, JobResult } from './JobQueueEngine';
 import { timeout, assertNever, assert, Logger, defaultLogger } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
+import type { WorkflowRunner } from './WorkflowRunner';
 
 export type Opts = {
   logger: Logger,
 };
 
-export type ConstructorOpts = Partial<Opts>;
+// Utility types mirroring WorkflowDispatcher for queue typing
+ type WorkflowsArray = ReadonlyArray<Workflow<any, any, any>>;
+ type NamesOf<A extends WorkflowsArray> = A[number] extends infer U
+   ? U extends Workflow<any, any, infer N> ? N : never
+   : never;
 
-type RequireExactKeys<TObj, K extends PropertyKey> = Exclude<keyof TObj, K> extends never
-  ? (Exclude<K, keyof TObj> extends never ? TObj : never)
-  : never;
+ type RequireExactKeys<TObj, K extends PropertyKey> = Exclude<keyof TObj, K> extends never
+   ? (Exclude<K, keyof TObj> extends never ? TObj : never)
+   : never;
+
+ export type ConstructorOpts<A extends WorkflowsArray>
+  = Partial<Opts>
+  & { queues?: RequireExactKeys<Record<NamesOf<A>, string>, NamesOf<A>> };
 
 function collectWorkflows(root: Workflow<any, any>): Workflow<any, any>[] {
   const res: Workflow<any, any>[] = [];
@@ -59,17 +68,47 @@ function findWorkflow(workflows: Workflow<any, any>[], jobData: WorkflowJobData)
   return workflow;
 }
 
-export class JobQueueWorkflowRunner {
+export class JobQueueWorkflowRunner implements WorkflowRunner {
   private opts: Opts;
+  private queuesMap: Record<string, string>;
+  private allWorkflows: Workflow<any, any, any>[];
+  private queuesToServe: string[];
 
   constructor(
     private engine: JobQueueEngine,
-    opts?: ConstructorOpts
+    private workflows: WorkflowsArray,
+    opts?: ConstructorOpts<WorkflowsArray>
   ) {
     this.opts = {
       logger: defaultLogger,
       ...opts,
     };
+    this.queuesMap = (opts?.queues as Record<string, string> | undefined) ?? {};
+
+    // collect all workflows (including children) and dedupe
+    const collected = new Map<string, Workflow<any, any, any>>();
+    for (const root of workflows) {
+      for (const wf of collectWorkflows(root)) {
+        const key = `${wf.name}:${wf.version}:${wf.steps.length}`;
+        if (!collected.has(key)) collected.set(key, wf);
+      }
+    }
+    this.allWorkflows = Array.from(collected.values());
+
+    // derive queues to serve
+    const queueSet = new Set<string>();
+    for (const wf of this.allWorkflows) {
+      const q = this.queuesMap[wf.name] ?? wf.queue;
+      if (q) queueSet.add(q);
+    }
+    this.queuesToServe = Array.from(queueSet);
+    if (this.queuesToServe.length === 0) {
+      throw Error('runner: no queues configured for any workflow');
+    }
+  }
+
+  private queueForWorkflow(wf: Workflow<any, any, any>, fallback: string): string {
+    return this.queuesMap[wf.name] ?? wf.queue ?? fallback;
   }
 
   async runSteps<Input, Output>(
@@ -77,7 +116,6 @@ export class JobQueueWorkflowRunner {
     job: JobData<WorkflowJobData<Input>>,
     queue: string,
     token: string,
-    queues?: Record<string, string>,
     childResults?: Record<string, JobResult<unknown>>,
   ): Promise<[Output | undefined, 'suspended' | 'success']>{
     let stepIndex = job.input.step;
@@ -118,7 +156,7 @@ export class JobQueueWorkflowRunner {
             : Object.entries(step as Record<string, Workflow<unknown, unknown>>)
         );
         const childrenPayload = entries.map(([key, childWorkflow]) => {
-          const childQueue = (queues && (queues[key] ?? queues[childWorkflow.name])) ?? childWorkflow.queue ?? queue;
+          const childQueue = this.queueForWorkflow(childWorkflow, queue);
           if (!childQueue) {
             throw Error(`missing queue for child workflow: ${childWorkflow.name}`);
           }
@@ -170,40 +208,19 @@ export class JobQueueWorkflowRunner {
     return [result as Output, 'success'];
   }
 
-  run<W extends Workflow<any, any, any>>(workflow: W, opts?: { queue?: string, queues?: RequireExactKeys<Record<WorkflowNames<W>, string>, WorkflowNames<W>> }) {
-    const queuesMap = opts?.queues as Record<string, string> | undefined;
-    const queue = opts?.queue ?? (queuesMap && queuesMap?.[workflow.name]) ?? workflow.queue;
-    if (!queue) {
-      throw Error('runner: queue not specified');
-    }
-    const workflows = collectWorkflows(workflow);
-    let stop = false;
+  run() {
     const token = uuidv4();
-    const workerPromise = (async () => {
-      process.on('SIGTERM', () => {
-        this.opts.logger.warn({
-          queue,
-          workflowName: workflow.name,
-          workflowVersion: workflow.version,
-        }, 'workflow runner: sigterm received; trying to stop gracefully');
-        stop = true;
-      });
-      this.opts.logger.info({
-        queue,
-        workflowName: workflow.name,
-        workflowVersion: workflow.version,
-      }, `workflow runner: started`);
+    let stop = false;
+    const loops = this.queuesToServe.map((queue) => (async () => {
+      this.opts.logger.info({ queue }, 'workflow runner: started');
       while (!stop) {
         try {
-          const {
-            data: job,
-            childResults
-          } = await this.engine.acquireJob<WorkflowJobData, unknown, unknown>({ queue, token, block: true });
+          const { data: job, childResults } = await this.engine.acquireJob<WorkflowJobData, unknown, unknown>({ queue, token, block: true });
           if (job) {
             const jobId = job.id;
             try {
-              const wf = findWorkflow(workflows, job.input);
-              const [output, status] = await this.runSteps(wf, job as JobData<WorkflowJobData<any>>, queue, token, queuesMap, childResults);
+              const wf = findWorkflow(this.allWorkflows, job.input);
+              const [output, status] = await this.runSteps(wf, job as JobData<WorkflowJobData<any>>, queue, token, childResults);
               if (status === 'suspended') {
                 continue;
               } else if (status === 'success') {
@@ -212,33 +229,27 @@ export class JobQueueWorkflowRunner {
                 assertNever(status);
               }
             } catch (err) {
-              this.opts.logger.error({
-                err, queue,
-                workflowName: workflow.name,
-                workflowVersion: workflow.version,
-              }, 'workflow runner: exception occured when running workflow');
+              this.opts.logger.error({ err, queue }, 'workflow runner: exception occured when running workflow');
               const reason = `exception when running workflow: ${new String(err)}`;
               await this.engine.completeJob({ queue, token, jobId, result: { type: 'error', reason } });
             }
           }
         } catch (err) {
-          this.opts.logger.error({
-            err, queue,
-            workflowName: workflow.name,
-            workflowVersion: workflow.version,
-          }, 'workflow runner: exception occured while running worker loop; sleeping 1s before continuing');
+          this.opts.logger.error({ err, queue }, 'workflow runner: exception occured while running worker loop; sleeping 1s before continuing');
           await timeout(1000);
         }
       }
-      this.opts.logger.info({
-        queue,
-        workflowName: workflow.name,
-        workflowVersion: workflow.version,
-      }, `workflow runner: stopped`);
-    })();
+      this.opts.logger.info({ queue }, 'workflow runner: stopped');
+    })());
+
+    process.on('SIGTERM', () => {
+      this.opts.logger.warn({}, 'workflow runner: sigterm received; trying to stop gracefully');
+      stop = true;
+    });
+
     return async () => {
       stop = true;
-      await workerPromise;
+      await Promise.all(loops);
     };
   }
 }

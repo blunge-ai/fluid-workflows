@@ -1,5 +1,6 @@
 export {
  Workflow,
+ executeQueueless,
 } from './Workflow';
 export type {
  WorkflowProps as WorkflowOptions,
@@ -7,9 +8,6 @@ export type {
  ProgressFn,
  StepFn,
 } from './Workflow';
-export {
- InMemoryWorkflowRunner
-} from './InMemoryWorkflowRunner';
 export {
  JobQueueWorkflowRunner
 } from './JobQueueWorkflowRunner';
