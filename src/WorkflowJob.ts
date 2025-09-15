@@ -6,7 +6,7 @@ export type WorkflowJobData<Input = unknown> = {
   name: string,
   version: number,
   totalSteps: number,
-  step: number,
+  currentStep: number,
   input: Input,
 };
 
@@ -20,7 +20,7 @@ export function makeWorkflowJobData<Input = unknown>({ props, input }: { props: 
     name: props.name,
     version: props.version,
     totalSteps: props.numSteps,
-    step: 0,
+    currentStep: 0,
     input: input,
   } satisfies WorkflowJobData<Input>;
 }

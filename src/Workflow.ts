@@ -114,3 +114,56 @@ export async function runQueueless<Input, Output>(workflow: Workflow<Input, Outp
   }
   return result as Output;
 }
+
+export function findWorkflow(workflows: Workflow<unknown, unknown>[], props: Pick<WorkflowProps, 'name' | 'version'>) {
+  const { name, version } = props;
+  const workflow = workflows.find((w) => w.name === name && w.version === version);
+  if (!workflow) {
+    throw Error(`no workflow found for '${name}' version ${version}`);
+  }
+  return workflow;
+}
+
+export function validateWorkflowSteps(workflow: Workflow<unknown, unknown, any>, { totalSteps, currentStep }: { totalSteps: number, currentStep: number }) {
+  if (currentStep >= totalSteps) {
+    throw Error(`inconsistent jobData: current step is ${currentStep} but expected value smaller than ${totalSteps}`);
+  }
+  if (workflow.steps.length !== totalSteps) {
+    throw Error(`job totalSteps mismatch: expected ${workflow.steps.length}, received ${totalSteps}`);
+  }
+}
+
+export function collectWorkflows(workflows: Workflow<any, any>[]): Workflow<any, any>[] {
+
+  const result: Workflow<any, any>[] = [];
+  const seen = new Set<string>();
+
+  const visit = (wf: Workflow<any, any>) => {
+    const key = `${wf.name}:${wf.version}`;
+    if (seen.has(key)) {
+      if (!result.includes(wf)) {
+        throw Error(`duplicate workflow with mismatching instance identity: ${key}`);
+      }
+      return;
+    };
+    seen.add(key);
+    result.push(wf);
+    for (const step of wf.steps) {
+      if (step instanceof Workflow) {
+        visit(step as Workflow<any, any>);
+      } else if (typeof step === 'function') {
+        continue;
+      } else {
+        const record = step as Record<string, Workflow<any, any>>;
+        for (const child of Object.values(record)) {
+          visit(child);
+        }
+      }
+    }
+  };
+
+  for (const root of workflows) {
+    visit(root);
+  }
+  return result;
+}

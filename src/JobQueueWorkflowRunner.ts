@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowRunOptions } from './Workflow';
+import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps, collectWorkflows } from './Workflow';
 import type { JobQueueEngine, JobData, JobResult } from './JobQueueEngine';
 import { timeout, assertNever, assert, Logger, defaultLogger } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
@@ -10,63 +10,18 @@ export type Opts = {
 };
 
 // Utility types mirroring WorkflowDispatcher for queue typing
- type WorkflowsArray = ReadonlyArray<Workflow<any, any, any>>;
- type NamesOf<A extends WorkflowsArray> = A[number] extends infer U
-   ? U extends Workflow<any, any, infer N> ? N : never
-   : never;
+type WorkflowsArray = Workflow<any, any, any>[];
+type NamesOf<A extends WorkflowsArray> = A[number] extends infer U
+  ? U extends Workflow<any, any, infer N> ? N : never
+  : never;
 
- type RequireExactKeys<TObj, K extends PropertyKey> = Exclude<keyof TObj, K> extends never
-   ? (Exclude<K, keyof TObj> extends never ? TObj : never)
-   : never;
+type RequireExactKeys<TObj, K extends PropertyKey> = Exclude<keyof TObj, K> extends never
+  ? (Exclude<K, keyof TObj> extends never ? TObj : never)
+  : never;
 
- export type ConstructorOpts<A extends WorkflowsArray>
+export type ConstructorOpts<A extends WorkflowsArray>
   = Partial<Opts>
   & { queues: RequireExactKeys<Record<NamesOf<A>, string>, NamesOf<A>> };
-
-function collectWorkflows(root: Workflow<any, any>): Workflow<any, any>[] {
-  const res: Workflow<any, any>[] = [];
-  const seen = new Set<string>();
-  const visit = (wf: Workflow<any, any>) => {
-    const key = `${wf.name}:${wf.version}`;
-    if (seen.has(key)) {
-      if (!res.includes(wf)) {
-        throw Error(`duplicate workflow with mismatching instance identity: ${key}`);
-      }
-      return;
-    };
-    seen.add(key);
-    res.push(wf);
-    for (const step of wf.steps) {
-      if (step instanceof Workflow) {
-        visit(step as Workflow<any, any>);
-      } else if (typeof step === 'function') {
-        continue;
-      } else {
-        const record = step as Record<string, Workflow<any, any>>;
-        for (const child of Object.values(record)) {
-          visit(child);
-        }
-      }
-    }
-  };
-  visit(root);
-  return res;
-}
-
-function findWorkflow(workflows: Workflow<any, any>[], jobData: WorkflowJobData) {
-  const { name, version, totalSteps, step } = jobData;
-  if (step >= totalSteps) {
-    throw Error(`inconsistent jobData: current step is ${step} but expected value smaller than ${totalSteps}`);
-  }
-  const workflow = workflows.find((w) => w.name === name && w.version === version);
-  if (!workflow) {
-    throw Error(`no workflow found for '${name}' version ${version}`);
-  }
-  if (workflow.steps.length !== totalSteps) {
-    throw Error(`job totalSteps mismatch: expected ${workflow.steps.length}, received ${totalSteps}`);
-  }
-  return workflow;
-}
 
 export class JobQueueWorkflowRunner implements WorkflowRunner {
   private opts: Opts;
@@ -84,18 +39,8 @@ export class JobQueueWorkflowRunner implements WorkflowRunner {
       ...opts,
     };
     this.queuesMap = opts.queues;
+    this.allWorkflows = collectWorkflows(workflows);
 
-    // collect all workflows (including children) and dedupe
-    const collected = new Map<string, Workflow<any, any, any>>();
-    for (const root of workflows) {
-      for (const wf of collectWorkflows(root)) {
-        const key = `${wf.name}:${wf.version}:${wf.steps.length}`;
-        if (!collected.has(key)) collected.set(key, wf);
-      }
-    }
-    this.allWorkflows = Array.from(collected.values());
-
-    // derive queues to serve
     const queueSet = new Set<string>();
     for (const wf of this.allWorkflows) {
       const queue = this.queuesMap[wf.name];
@@ -112,7 +57,7 @@ export class JobQueueWorkflowRunner implements WorkflowRunner {
     token: string,
     childResults?: Record<string, JobResult<unknown>>,
   ): Promise<[Output | undefined, 'suspended' | 'success']>{
-    let stepIndex = job.input.step;
+    let stepIndex = job.input.currentStep;
     const steps = workflow.steps.slice(stepIndex);
     let result: unknown = job.input.input;
 
@@ -193,7 +138,7 @@ export class JobQueueWorkflowRunner implements WorkflowRunner {
       stepIndex += 1;
       // the result of the last step will be used to complete the job and doesn't need to be persisted
       if (stepIndex !== workflow.steps.length) {
-        const newInput = { ...job.input, input: result as Input, step: stepIndex } satisfies WorkflowJobData<Input>;
+        const newInput = { ...job.input, input: result as Input, currentStep: stepIndex } satisfies WorkflowJobData<Input>;
         await this.engine.updateJob({ queue, token, jobId: job.id, input: newInput });
       }
     }
@@ -211,8 +156,9 @@ export class JobQueueWorkflowRunner implements WorkflowRunner {
           if (job) {
             const jobId = job.id;
             try {
-              const wf = findWorkflow(this.allWorkflows, job.input);
-              const [output, status] = await this.runSteps(wf, job as JobData<WorkflowJobData<any>>, queue, token, childResults);
+              const workflow = findWorkflow(this.allWorkflows, job.input);
+              validateWorkflowSteps(workflow, job.input);
+              const [output, status] = await this.runSteps(workflow, job as JobData<WorkflowJobData<any>>, queue, token, childResults);
               if (status === 'suspended') {
                 continue;
               } else if (status === 'success') {
