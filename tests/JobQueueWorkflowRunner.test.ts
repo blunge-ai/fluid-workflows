@@ -26,7 +26,7 @@ test('run step', async () => {
 
   const runner = new JobQueueWorkflowRunner(engine, [workflow], { queues: { 'add-a-and-b': queue } });
   const dispatcher = new JobQueueWorkflowDispatcher(engine, [workflow], { queues: { 'add-a-and-b': queue } });
-  const stop = runner.run();
+  const stop = runner.run('all');
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 12, b: 34 });
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();
@@ -54,7 +54,7 @@ test('run child workflow', async () => {
 
   const runner = new JobQueueWorkflowRunner(engine, [workflow, child], { queues: { 'parent-workflow': queue, 'child-workflow': queue } });
   const dispatcher = new JobQueueWorkflowDispatcher(engine, [workflow, child], { queues: { 'parent-workflow': queue, 'child-workflow': queue } });
-  const stop = runner.run();
+  const stop = runner.run('all');
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { parentInput: 'XX' });
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();
@@ -87,9 +87,9 @@ test('run two named children', async () => {
       return { out: `${one.a2}-${two.s2}` };
     });
 
-  const runner = new JobQueueWorkflowRunner(engine, [parent, child1, child2], { queues: { 'parent-two-children': queue, child1: queue, child2: queue } });
-  const dispatcher = new JobQueueWorkflowDispatcher(engine, [parent, child1, child2], { queues: { 'parent-two-children': queue, child1: queue, child2: queue } });
-  const stop = runner.run();
+  const runner = new JobQueueWorkflowRunner(engine, [parent, child1, child2], { queues: { 'parent-two-children': 'z' as const, child1: 'y' as const, child2: 'x' as const } });
+  const dispatcher = new JobQueueWorkflowDispatcher(engine, [parent, child1, child2], { queues: { 'parent-two-children': queue, child1: queue, child2: queue } as const });
+  const stop = runner.run(['x', 'qq']);
   const result = await dispatcher.dispatchAwaitingOutput(parent, { n: 5 });
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();

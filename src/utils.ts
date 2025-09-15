@@ -1,5 +1,12 @@
 import Redis from 'ioredis';
 
+type IsPlainObject<T> = T extends Record<string, unknown> ? true : false;
+
+export type Simplify<T> =
+  IsPlainObject<T> extends true
+    ? { [KeyType in keyof T]: Simplify<T[KeyType]> }
+    : T;
+
 export const redisOptions ={
   family: 6, // IPv6 required for fly.io
   enableOfflineQueue: true,

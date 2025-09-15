@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowProps, WorkflowNames, findWorkflow } from './Workflow';
+import { Workflow, WorkflowProps, WorkflowNames, findWorkflow, collectWorkflows } from './Workflow';
 import { WorkflowJobData, makeWorkflowJobData } from './WorkflowJob';
 import type { JobQueueEngine, JobResultStatus } from './JobQueueEngine';
 import { isResultStatus } from './JobQueueEngine';
@@ -9,31 +9,41 @@ export type Opts = {
   logger: Logger,
 };
 
-type WorkflowsArray = Workflow<any, any, any>[];
-type NamesOf<A extends WorkflowsArray> = WorkflowNames<A[number]>;
+type WorkflowsArray<Names extends string> = Workflow<any, any, Names>[];
 
 type RequireExactKeys<TObj, K extends PropertyKey> = Exclude<keyof TObj, K> extends never
   ? (Exclude<K, keyof TObj> extends never ? TObj : never)
   : never;
 
-export type ConstructorOpts<A extends WorkflowsArray>
- = Partial<Opts>
- & { queues: RequireExactKeys<Record<NamesOf<A>, string>, NamesOf<A>> };
+type NamesOf<A extends WorkflowsArray<Names>, Names extends string> = A[number] extends infer U
+  ? U extends Workflow<any, any, infer N> ? N : never
+  : never;
 
-export class JobQueueWorkflowDispatcher<A extends WorkflowsArray> {
+export type ConstructorOpts<A extends WorkflowsArray<Names>, Names extends string, Q extends string>
+ = Partial<Opts>
+ & { queues: RequireExactKeys<Record<NamesOf<A, Names>, Q>, NamesOf<A, Names>> };
+
+export class JobQueueWorkflowDispatcher<const Names extends string, A extends WorkflowsArray<Names>, const Q extends string> {
   private opts: Opts;
-  private queues: Record<string, string>;
+  private queuesMap: Record<string, Q>;
+  private allWorkflows: Workflow<any, any, any>[];
 
   constructor(
     private engine: JobQueueEngine,
-    private workflows: A,
-    opts: ConstructorOpts<A>,
+    workflows: A,
+    opts: ConstructorOpts<A, Names, Q>,
   ) {
     this.opts = {
       logger: defaultLogger,
       ...opts,
     };
-    this.queues = opts.queues;
+    this.queuesMap = opts.queues;
+    this.allWorkflows = collectWorkflows(workflows);
+    for (const workflow of this.allWorkflows) {
+      if (!this.queuesMap[workflow.name]) {
+        throw Error(`no queue found workflow ${workflow.name}`);
+      }
+    }
   }
 
    async dispatch<Input, Meta = unknown>(
@@ -41,11 +51,11 @@ export class JobQueueWorkflowDispatcher<A extends WorkflowsArray> {
     input: Input,
     opts?: { jobId?: string, meta?: Meta },
   ) {
-    // ensure the workflow was passed to the constructor
-    findWorkflow(this.workflows, props);
+    // ensure the correct workflow/version was passed to the constructor
+    findWorkflow(this.allWorkflows, props);
 
     const jobId = opts?.jobId ?? `${props.name}-${uuidv4()}`;
-    const queue = this.queues[props.name];
+    const queue = this.queuesMap[props.name];
     assert(queue, 'queue not found');
 
     const workflowInput = {
@@ -66,11 +76,11 @@ export class JobQueueWorkflowDispatcher<A extends WorkflowsArray> {
     input: Input,
     opts?: { jobId?: string, meta?: Meta },
   ) {
-    // ensure the workflow was passed to the constructor
-    findWorkflow(this.workflows, props);
+    // ensure the correct workflow/version was passed to the constructor
+    findWorkflow(this.allWorkflows, props);
 
     const jobId = opts?.jobId ?? `${props.name}-${uuidv4()}`;
-    const queue = this.queues[props.name];
+    const queue = this.queuesMap[props.name];
     assert(queue, 'queue not found');
 
     const workflowInput = makeWorkflowJobData({ props, input });

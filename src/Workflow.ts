@@ -17,15 +17,16 @@ export type WorkflowNames<W>
   = W extends Workflow<unknown, unknown, infer N> ? N : never;
 
 type ChildrenFor<Out>
-  = { [K in keyof Out]: Workflow<Out[K], any, string> };
+  = { [K in keyof Out]: Workflow<Out[K], any, any> };
 
 type ExactChildren<Out, C extends ChildrenFor<Out>>
   = keyof C extends keyof Out ? C : never;
 
 type OutputsOfChildren<C>
-  = { [K in keyof C]: C[K] extends Workflow<unknown, infer O, string> ? O : never };
+  = { [K in keyof C]: C[K] extends Workflow<unknown, infer O, any> ? O : never };
 
-type ChildrenNames<C> = keyof C & string;
+// Union of the Name parameters of the child workflows
+type ChildrenNames<C> = C[keyof C] extends Workflow<unknown, unknown, infer N> ? N : never;
 
 // Sentinel type for type-dispatching the first .step() which gives a Workflow its input
 declare const __WF_UNSET__: unique symbol;
@@ -133,7 +134,7 @@ export function validateWorkflowSteps(workflow: Workflow<unknown, unknown, any>,
   }
 }
 
-export function collectWorkflows(workflows: Workflow<any, any>[]): Workflow<any, any>[] {
+export function collectWorkflows(workflows: ReadonlyArray<Workflow<any, any>>): Workflow<any, any>[] {
 
   const result: Workflow<any, any>[] = [];
   const seen = new Set<string>();

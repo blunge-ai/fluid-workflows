@@ -9,30 +9,29 @@ export type Opts = {
   logger: Logger,
 };
 
-// Utility types mirroring WorkflowDispatcher for queue typing
-type WorkflowsArray = Workflow<any, any, any>[];
-type NamesOf<A extends WorkflowsArray> = A[number] extends infer U
-  ? U extends Workflow<any, any, infer N> ? N : never
-  : never;
+type WorkflowsArray<Names extends string> = Workflow<any, any, Names>[];
 
 type RequireExactKeys<TObj, K extends PropertyKey> = Exclude<keyof TObj, K> extends never
   ? (Exclude<K, keyof TObj> extends never ? TObj : never)
   : never;
 
-export type ConstructorOpts<A extends WorkflowsArray>
-  = Partial<Opts>
-  & { queues: RequireExactKeys<Record<NamesOf<A>, string>, NamesOf<A>> };
+type NamesOf<A extends WorkflowsArray<Names>, Names extends string> = A[number] extends infer U
+  ? U extends Workflow<any, any, infer N> ? N : never
+  : never;
 
-export class JobQueueWorkflowRunner implements WorkflowRunner {
+export type ConstructorOpts<A extends WorkflowsArray<Names>, Names extends string, Q extends string>
+  = Partial<Opts>
+  & { queues: RequireExactKeys<Record<NamesOf<A, Names>, Q>, NamesOf<A, Names>> };
+
+export class JobQueueWorkflowRunner<const Names extends string, A extends WorkflowsArray<Names>, const Q extends string> implements WorkflowRunner<Q> {
   private opts: Opts;
-  private queuesMap: Record<string, string>;
+  private queuesMap: Record<string, Q>;
   private allWorkflows: Workflow<any, any, any>[];
-  private queuesToServe: string[];
 
   constructor(
     private engine: JobQueueEngine,
-    workflows: WorkflowsArray,
-    opts: ConstructorOpts<WorkflowsArray>
+    workflows: A,
+    opts: ConstructorOpts<A, Names, Q>
   ) {
     this.opts = {
       logger: defaultLogger,
@@ -40,20 +39,17 @@ export class JobQueueWorkflowRunner implements WorkflowRunner {
     };
     this.queuesMap = opts.queues;
     this.allWorkflows = collectWorkflows(workflows);
-
-    const queueSet = new Set<string>();
-    for (const wf of this.allWorkflows) {
-      const queue = this.queuesMap[wf.name];
-      assert(queue, 'queue not found');
-      queueSet.add(queue);
+    for (const workflow of this.allWorkflows) {
+      if (!this.queuesMap[workflow.name]) {
+        throw Error(`no queue found workflow ${workflow.name}`);
+      }
     }
-    this.queuesToServe = Array.from(queueSet);
   }
 
   async runSteps<Input, Output>(
     workflow: Workflow<Input, Output>,
     job: JobData<WorkflowJobData<Input>>,
-    queue: string,
+    queue: Q,
     token: string,
     childResults?: Record<string, JobResult<unknown>>,
   ): Promise<[Output | undefined, 'suspended' | 'success']>{
@@ -95,7 +91,7 @@ export class JobQueueWorkflowRunner implements WorkflowRunner {
             : Object.entries(step as Record<string, Workflow<unknown, unknown>>)
         );
         const childrenPayload = entries.map(([key, childWorkflow]) => {
-          const childQueue = this.queuesMap[childWorkflow.name];
+          const childQueue = this.queuesMap[childWorkflow.name as string];
           assert(childQueue, 'child queue not found');
           return {
             data: {
@@ -145,10 +141,24 @@ export class JobQueueWorkflowRunner implements WorkflowRunner {
     return [result as Output, 'success'];
   }
 
-  run() {
+  run(queues: 'all' | Q[]) {
     const token = uuidv4();
     let stop = false;
-    const loops = this.queuesToServe.map((queue) => (async () => {
+    const allQueues = new Set(Object.values(this.queuesMap));
+    let queueSet;
+    if (queues === 'all') {
+      queueSet = allQueues;
+    } else {
+      queueSet = new Set<Q>();
+      for (const q of queues) {
+        if (!allQueues.has(q)) {
+          throw Error('must initialise runner with all queues that are to be run');
+        }
+        queueSet.add(q);
+      }
+    }
+    const queueList = Array.from(queueSet) as Q[];
+    const loops = queueList.map((queue: Q) => (async () => {
       this.opts.logger.info({ queue }, 'workflow runner: started');
       while (!stop) {
         try {

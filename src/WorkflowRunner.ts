@@ -1,3 +1,3 @@
-export interface WorkflowRunner {
-  run(): () => Promise<void>;
+export interface WorkflowRunner<Q extends string> {
+  run(queues: 'all' | Q[]): () => Promise<void>;
 }
