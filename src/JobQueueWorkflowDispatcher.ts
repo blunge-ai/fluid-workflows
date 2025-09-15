@@ -15,7 +15,7 @@ type ConstructorOpts<Wfs extends WorkflowsArray<Names>, Names extends string, Qs
   & QueuesOption<Wfs, Names, Qs>;
 
 export class JobQueueWorkflowDispatcher<
-  const Names extends string,
+  const Names extends NamesOf<Wfs, string>,
   const Wfs extends WorkflowsArray<Names>,
   const Qs extends Record<NamesOf<Wfs, Names>, string>
 > {
@@ -34,6 +34,8 @@ export class JobQueueWorkflowDispatcher<
     };
     this.queuesMap = opts.queues;
     this.allWorkflows = collectWorkflows(workflows);
+
+    // ensure we have a queue for every workflow that can be dispatched
     for (const workflow of this.allWorkflows) {
       if (!this.queuesMap[workflow.name]) {
         throw Error(`no queue found workflow ${workflow.name}`);
@@ -41,8 +43,8 @@ export class JobQueueWorkflowDispatcher<
     }
   }
 
-   async dispatch<Input, Meta = unknown>(
-    props: WorkflowProps,
+  async dispatch<const N extends Names, Input, Meta = unknown>(
+    props: Workflow<Input, any, N>,
     input: Input,
     opts?: { jobId?: string, meta?: Meta },
   ) {
@@ -53,21 +55,15 @@ export class JobQueueWorkflowDispatcher<
     const queue = this.queuesMap[props.name];
     assert(queue, 'queue not found');
 
-    const workflowInput = {
-      name: props.name,
-      version: props.version,
-      totalSteps: props.numSteps,
-      currentStep: 0,
-      input,
-    } satisfies WorkflowJobData<Input>;
+    const workflowInput = makeWorkflowJobData({ props, input });
     return await this.engine.submitJob({
       data: { id: jobId, input: workflowInput, meta: opts?.meta },
       queue,
     });
   }
   
-  async dispatchAwaitingOutput<Input, Output, Meta>(
-    props: Workflow<Input, Output, any>,
+  async dispatchAwaitingOutput<const N extends Names, Input, Output, Meta = unknown>(
+    props: Workflow<Input, Output, N>,
     input: Input,
     opts?: { jobId?: string, meta?: Meta },
   ) {

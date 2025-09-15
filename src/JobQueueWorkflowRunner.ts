@@ -15,7 +15,7 @@ type ConstructorOpts<Wfs extends WorkflowsArray<Names>, Names extends string, Qs
   & QueuesOption<Wfs, Names, Qs>;
 
 export class JobQueueWorkflowRunner<
-  const Names extends string,
+  const Names extends NamesOf<Wfs, string>,
   const Wfs extends WorkflowsArray<Names>,
   const Qs extends Record<NamesOf<Wfs, Names>, string>
 > implements WorkflowRunner<ValueOf<Qs>> {
@@ -34,6 +34,9 @@ export class JobQueueWorkflowRunner<
     };
     this.queuesMap = opts.queues;
     this.allWorkflows = collectWorkflows(workflows);
+
+    // ensure we have a queue for every workflow that is going to be run
+    // or job that is going to be submitted
     for (const workflow of this.allWorkflows) {
       if (!this.queuesMap[workflow.name]) {
         throw Error(`no queue found workflow ${workflow.name}`);
@@ -77,9 +80,10 @@ export class JobQueueWorkflowRunner<
 
     for (const step of steps) {
       if (typeof step === 'function' && !(step instanceof Workflow)) {
-        // step function
+        // handle step function
         result = await step(result, runOptions);
       } else {
+        // handle child or childMap workflows
         const entries = (
           step instanceof Workflow
             ? [['', step]] satisfies [string, Workflow<unknown, unknown>][]
@@ -140,20 +144,13 @@ export class JobQueueWorkflowRunner<
     const token = uuidv4();
     let stop = false;
     const allQueues = new Set(Object.values(this.queuesMap));
-    let queueSet;
-    if (queues === 'all') {
-      queueSet = allQueues;
-    } else {
-      queueSet = new Set<ValueOf<Qs>>();
-      for (const q of queues) {
-        if (!allQueues.has(q)) {
-          throw Error('must initialise runner with all queues that are to be run');
-        }
-        queueSet.add(q);
+    const queueSet = queues === 'all' ? allQueues : new Set(queues);
+    for (const q of queueSet) {
+      if (!allQueues.has(q)) {
+        throw Error('run must be called with a queue that was used to initialise the runner');
       }
     }
-    const queueList = Array.from(queueSet);
-    const loops = queueList.map((queue) => (async () => {
+    const loops = Array.from(queueSet).map(async (queue) => {
       this.opts.logger.info({ queue }, 'workflow runner: started');
       while (!stop) {
         try {
@@ -183,7 +180,7 @@ export class JobQueueWorkflowRunner<
         }
       }
       this.opts.logger.info({ queue }, 'workflow runner: stopped');
-    })());
+    });
 
     process.on('SIGTERM', () => {
       this.opts.logger.warn({}, 'workflow runner: sigterm received; trying to stop gracefully');
