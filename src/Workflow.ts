@@ -16,17 +16,17 @@ export type StepFn<Input, Output> = (input: Input, runOpts: WorkflowRunOptions) 
 export type WorkflowNames<W>
   = W extends Workflow<unknown, unknown, infer N> ? N : never;
 
-type ChildrenFor<Out>
-  = { [K in keyof Out]: Workflow<Out[K], any, any> };
+type ChildrenMap<Out, Cn extends string>
+  = { [K in keyof Out]: Workflow<Out[K], any, Cn> };
 
-type ExactChildren<Out, C extends ChildrenFor<Out>>
-  = keyof C extends keyof Out ? C : never;
+type ExactChildren<Out, Cn extends string, Cm extends ChildrenMap<Out, Cn>>
+  = keyof Cm extends keyof Out ? Cm : never;
 
-type OutputsOfChildren<C>
-  = { [K in keyof C]: C[K] extends Workflow<unknown, infer O, any> ? O : never };
+type OutputsOfChildren<Cm>
+  = { [K in keyof Cm]: Cm[K] extends Workflow<unknown, infer O, string> ? O : never };
 
-// Union of the Name parameters of the child workflows
-type ChildrenNames<C> = C[keyof C] extends Workflow<unknown, unknown, infer N> ? N : never;
+type ChildrenNames<Cm>
+  = Cm[keyof Cm] extends Workflow<any, any, infer N> ? N : never;
 
 // Sentinel type for type-dispatching the first .step() which gives a Workflow its input
 declare const __WF_UNSET__: unique symbol;
@@ -39,7 +39,7 @@ export class Workflow<Input = Unset, Output = Unset, const Names extends string 
   public inputSchema?: ZodTypeAny;
 
   constructor(
-    props: Pick<WorkflowProps, 'name' | 'version'>,
+     props: Pick<WorkflowProps, 'name' | 'version'>,
     public steps: Array<
       StepFn<unknown, unknown> |
       Workflow<unknown, unknown, string> |
@@ -64,23 +64,29 @@ export class Workflow<Input = Unset, Output = Unset, const Names extends string 
   step<NewOutput, StepInput>(this: Workflow<Unset, Unset, Names>, stepFn: StepFn<StepInput, NewOutput>): Workflow<StepInput, NewOutput, Names>;
   step<NewOutput>(this: Workflow<Input, Unset, Names>, stepFn: StepFn<Input, NewOutput>): Workflow<Input, NewOutput, Names>;
   step<NewOutput, StepInput>(this: Workflow<Input, StepInput, Names>, stepFn: StepFn<StepInput, NewOutput>): Workflow<Input, NewOutput, Names>;
-  step<NewOutput, StepInput>(this: Workflow<Unset | unknown, Unset | StepInput, Names>, stepFn: StepFn<StepInput, NewOutput>): Workflow<unknown, NewOutput, Names> {
+  step<NewOutput, StepInput>(this: Workflow<Unset | unknown, Unset | StepInput, Names>, stepFn: StepFn<any, any>): Workflow<any, NewOutput, Names> {
     return new Workflow(
       { name: this.name, version: this.version },
-      [ ...this.steps, stepFn as StepFn<unknown, unknown> ],
+      [ ...this.steps, stepFn ],
       this.inputSchema,
     );
   }
 
   // TODO dispatch on Workflow<Unset, Unset> like step() to allow a childStep to be the first step in a workflow
   // childStep(child1)
-  childStep<ChildOutput, const ChildNames extends string>(child: Workflow<Output, ChildOutput, ChildNames>): Workflow<Input, ChildOutput, Names | ChildNames>;
+  childStep<
+    ChildOutput,
+    const Cn extends string,
+  >(child: Workflow<Output, ChildOutput, Cn>): Workflow<Input, ChildOutput, Names | Cn>;
   // childStep({ child1, child2 })
-  childStep<const C extends ChildrenFor<Output>>(childrenMap: ExactChildren<Output, C>): Workflow<Input, OutputsOfChildren<C>, Names | ChildrenNames<C>>;
-  childStep(childOrChildrenMap: unknown): unknown {
-    return new Workflow<Input, unknown, string>(
+  childStep<
+    const Cm extends ChildrenMap<Output, Cn>,
+    const Cn extends string,
+  >(childrenMap: ExactChildren<Output, Cn, Cm>): Workflow<Input, OutputsOfChildren<Cm>, Names | ChildrenNames<Cm>>;
+  childStep(childOrChildrenMap: Workflow<unknown, unknown, string>): unknown {
+    return new Workflow(
       { name: this.name, version: this.version },
-      [ ...this.steps, childOrChildrenMap as Workflow<unknown, unknown, string> ],
+      [ ...this.steps, childOrChildrenMap  ],
       this.inputSchema,
     );
   }
