@@ -3,7 +3,16 @@
   "version": "0.1.0",
   "private": false,
   "type": "module",
-  "description": "",
+  "description": "Type-safe workflow building + job-queue execution with adapters.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/blunge-ai/fluid-workflows.git"
+  },
+  "bugs": {
+    "url": "https://github.com/blunge-ai/fluid-workflows/issues"
+  },
+  "homepage": "https://github.com/blunge-ai/fluid-workflows#readme",
   "files": ["dist"],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
