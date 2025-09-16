@@ -40,9 +40,9 @@ console.log(out.sum); // 5
 
 To use the `BullMQAdapter` you need to have redis running and the `REDIS_URL` env variable defined.
 
-For example to run tests:
+For example, to run tests:
 
-```
+```bash
 export REDIS_URL=redis://127.0.0.1:6379 npm run test
 ```
 
@@ -94,7 +94,7 @@ You can pass a map of `{[key]: Workflow}` to `childStep()` to run multiple child
 keys can be arbitrary but must match the output map of the previous step and the child results will be
 mapped to the same keys as the input to the next step.
 
-```
+```ts
 const child1 = fwf.workflow({ name: 'child2', version: 1 })
   .step(async (input: string) => 'child1-output');
 
@@ -122,7 +122,7 @@ You may have noticed that we need to specify the type of the input to the first 
 can pass a **zod** schema to automatically infer the input type to the first step. The inputs to the
 workflow will also be validated against the schema during workflow execution.
 
-```
+```ts
 const schema = z.object({ a: z.number(), b: z.number() });
 
 const parent = fwf.workflow({ name: 'parent', version: 1, schema })
