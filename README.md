@@ -123,9 +123,9 @@ can pass a **zod** schema to automatically infer the input type to the first ste
 workflow will also be validated against the schema during workflow execution.
 
 ```ts
-const schema = z.object({ a: z.number(), b: z.number() });
+const inputSchema = z.object({ a: z.number(), b: z.number() });
 
-const parent = fwf.workflow({ name: 'parent', version: 1, schema })
+const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
   .step(async ({ a, b }) => ({ 
      ...
   }));
