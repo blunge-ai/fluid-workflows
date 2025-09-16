@@ -97,9 +97,9 @@ test('run two named children', async () => {
     .step(async ({ n }) => ({ out: n }));
 
   const queues = { 'parent-two-children': 'queue-a', child1: 'queue-b', child2: 'queue-c' } as const;
-  const config3 = new Config({ engine, workflows: [parent], queues });
-  const runner = new JobQueueWorkflowRunner(config3);
-  const dispatcher = new JobQueueWorkflowDispatcher(config3);
+  const config = new Config({ engine, workflows: [parent], queues });
+  const runner = new JobQueueWorkflowRunner(config);
+  const dispatcher = new JobQueueWorkflowDispatcher(config);
   const stop = runner.run(['queue-a', 'queue-b', 'queue-c']);
   const result = await dispatcher.dispatchAwaitingOutput(parent, { n: 5 });
   await timeout(100);
