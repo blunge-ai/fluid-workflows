@@ -1,5 +1,5 @@
 {
-  "name": "fluid-workflows",
+  "name": "@blunge/fluid-workflows",
   "version": "0.1.0",
   "private": false,
   "type": "module",
