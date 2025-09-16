@@ -2,13 +2,13 @@ import { expect, test } from 'vitest'
 import { Workflow } from '~/Workflow';
 import { JobQueueWorkflowRunner } from '~/JobQueueWorkflowRunner';
 import { JobQueueWorkflowDispatcher } from '~/JobQueueWorkflowDispatcher';
-import { BullMqJobQueueEngine } from '~/BullMqJobQueueEngine';
+import { BullMqAdapter } from '~/BullMqAdapter';
 import { Config } from '~/Config';
 import { v4 as uuidv4 } from 'uuid';
 import { timeout } from '~/utils';
 
 function setup() {
-  const engine = new BullMqJobQueueEngine({ 
+  const engine = new BullMqAdapter({ 
     attempts: 1,
     lockTimeoutMs: 5000,
     blockingTimeoutSecs: 0.1,

@@ -395,7 +395,7 @@ export class BullMqJobQueue<Input = unknown, Output = unknown, Meta = unknown, P
   }
 }
 
-export class BullMqJobQueueEngine implements JobQueueEngine {
+export class BullMqAdapter implements JobQueueEngine {
   private queues: Record<string, BullMqJobQueue> = {};
   private redis: Redis;
   private subRedis: Redis;

@@ -1,11 +1,11 @@
 import { expect, test } from 'vitest'
-import { assert, timeout } from '~/utils';
+import { assert } from '~/utils';
 import { JobResultStatus } from '~/JobQueueEngine';
-import { BullMqJobQueueEngine } from '~/BullMqJobQueueEngine';
+import { BullMqAdapter } from '~/BullMqAdapter';
 import { v4 as uuidv4 } from 'uuid';
 
 test('submit job', async () => {
-  const engine = new BullMqJobQueueEngine({
+  const engine = new BullMqAdapter({
     attempts: 1,
     lockTimeoutMs: 8000
   });
@@ -42,7 +42,7 @@ test('submit job', async () => {
 });
 
 test('submit children', async () => {
-  const engine = new BullMqJobQueueEngine({
+  const engine = new BullMqAdapter({
     attempts: 1,
     lockTimeoutMs: 8000
   });
