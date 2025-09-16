@@ -18,7 +18,7 @@
   },
   "sideEffects": false,
   "engines": { "node": ">=18" },
-  "publishConfig": { "access": "public", "provenance": true },
+  "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --sourcemap --clean --out-dir dist",
     "tsc": "tsc",
