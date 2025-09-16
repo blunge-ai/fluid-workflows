@@ -15,6 +15,7 @@ export {
  JobQueueWorkflowDispatcher
 } from './JobQueueWorkflowDispatcher';
 export { Config } from './Config';
+export { BullMqAdapter } from './BullMqAdapter';
 
 import { Config } from './Config';
 import { JobQueueWorkflowRunner } from './JobQueueWorkflowRunner';
