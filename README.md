@@ -5,7 +5,7 @@ Type-safe workflow composition and job-queue execution with adapters.
 The main problem this project attempts to solve is the separation of the workflow implementation and
 execution.
 
-The implementation part is provided by the Workflow class, which provides a DSL or builder
+The implementation part is provided by the `Workflow` class, which provides a DSL or builder
 pattern to define the individual steps of a workflow.
 
 The execution part is currently provided by either the `runQueueless()` function, which is a simple
@@ -32,7 +32,7 @@ const wf = fwf.workflow({ name: 'add', version: 1 })
   .step(async ({ a, b }: { a: number; b: number }) => ({ sum: a + b }));
 
 // Runs the workflow in the current process to completion, useful for testing
-const out = await runQueueless(wf, { a: 2, b: 3 });
+const out = await fwf.runQueueless(wf, { a: 2, b: 3 });
 console.log(out.sum); // 5
 ```
 
@@ -53,7 +53,7 @@ const parent = fwf.workflow({ name: 'parent', version: 1 })
 // Engine and wiring
 
 const { runner, dispatcher } = fwf.config({
-  engine: new BullMqAdapter({ attempts: 1, lockTimeoutMs: 8000 }),
+  engine: new fwf.BullMqAdapter({ attempts: 1, lockTimeoutMs: 8000 }),
   workflows: [parent],
   queues: { parent: 'parent-queue, child: 'child-queue' } as const,
 });
