@@ -1,6 +1,6 @@
 {
   "name": "@blunge/fluid-workflows",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
   "description": "Type-safe workflow building + job-queue execution with adapters.",
@@ -13,7 +13,9 @@
     "url": "https://github.com/blunge-ai/fluid-workflows/issues"
   },
   "homepage": "https://github.com/blunge-ai/fluid-workflows#readme",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -26,8 +28,12 @@
     "./package.json": "./package.json"
   },
   "sideEffects": false,
-  "engines": { "node": ">=18" },
-  "publishConfig": { "access": "public" },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --sourcemap --clean --out-dir dist",
     "tsc": "tsc",
