@@ -14,7 +14,7 @@ way to run workflows in different processes by scheduling jobs via a queue engin
 
 * `JobQueueEngine` - interface that allows adapters for multiple queueing engines to be implemented,
 * `JobQueueWorkflowRunner` - runs/executes workflows using a `JobQueueEngine`, usually in a worker process,
-* `JobQueueWorkflowDispatcher` - dispatches/submits workflows to be run using a `JobQueueEngine`,
+* `JobQueueWorkflowDispatcher` - dispatches/submits workflows to be run using a `JobQueueEngine`, usually on the app server,
 * `BullMqAdapter` - an implementation of `JobQueueEngine` for **BullMq**.
 
 ## Install
@@ -51,7 +51,8 @@ export REDIS_URL=redis://127.0.0.1:6379 npm run test
 ```ts
 import * as fwf from '@blunge/fluid-workflows';
 
-// Define workflows
+// Workflows definitions
+
 const child = fwf.workflow({ name: 'child', version: 1 })
   .step(async ({ s }: { s: string }) => ({ s2: `child(${s})` }));
 
@@ -60,7 +61,7 @@ const parent = fwf.workflow({ name: 'parent', version: 1 })
   .childStep(child)
   .step(async ({ s2 }) => ({ out: s2 }));
 
-// Engine and wiring
+// Configuration
 
 const { runner, dispatcher } = fwf.config({
   engine: new fwf.BullMqAdapter({ attempts: 1, lockTimeoutMs: 8000 }),
@@ -111,14 +112,14 @@ const parent = fwf.workflow({ name: 'parent', version: 1 })
   })
   .step(async ({
     child1 // 'child1-output'
-    child1 // 'child2 output'
+    child2 // 'child2 output'
   }) => { ... });
 ```
 
 ### Zod schema support
 
 You may have noticed that we need to specify the type of the input to the first step explicitly. You
-can pass a zod schema to automatically infer the input type to the first step. The inputs to the
+can pass a **zod** schema to automatically infer the input type to the first step. The inputs to the
 workflow will also be validated against the schema during workflow execution.
 
 ```
