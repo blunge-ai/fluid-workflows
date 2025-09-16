@@ -20,7 +20,7 @@ way to run workflows in different processes by scheduling jobs via a queue engin
 ## Install
 
 ```bash
-npm install @blunge/fluid-workflows
+npm install @blunge/fluid-workflows bullmq ioredis zod
 ```
 
 ## Quick Start (queueless for testing)

@@ -48,17 +48,22 @@
     "@types/lodash": "^4.17.16",
     "@types/node": "^18.17.0",
     "eslint": "^9.19.0",
+    "bullmq": "^5.10.4",
+    "ioredis": "^5.4.2",
     "tsup": "^8.1.0",
     "typescript": "^5.6.2",
     "typescript-eslint": "^8.22.0",
-    "vitest": "^2.1.2"
+    "vitest": "^2.1.2",
+    "zod": "^4.1.8"
   },
   "dependencies": {
-    "bullmq": "^5.10.4",
-    "ioredis": "^5.4.2",
     "lodash": "^4.17.21",
     "msgpackr": "^1.11.2",
-    "uuid": "^11.0.5",
+    "uuid": "^11.0.5"
+  },
+  "peerDependencies": {
+    "bullmq": "^5.10.4",
+    "ioredis": "^5.4.2",
     "zod": "^4.1.8"
   }
 }
