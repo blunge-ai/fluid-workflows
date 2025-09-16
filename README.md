@@ -12,10 +12,10 @@ The execution part is currently provided by either the `runQueueless()` function
 in-process loop that calls the individual step functions, or the `JobQueue*` classes which provide a
 way to run workflows in different processes by scheduling jobs via a queue engine.
 
-`JobQueueEngine` - interface that allows adapters for multiple queueing engines to be implemented,
-`BullMqAdapter` - an implementation of `JobQueueEngine` for **BullMq**,
-`JobQueueWorkflowRunner` - runs/executes workflows using a `JobQueueEngine`, usually in a worker process,
-`JobQueueWorkflowDispatcher` - dispatches/submits workflows to be run using a `JobQueueEngine`.
+* `JobQueueEngine` - interface that allows adapters for multiple queueing engines to be implemented,
+* `JobQueueWorkflowRunner` - runs/executes workflows using a `JobQueueEngine`, usually in a worker process,
+* `JobQueueWorkflowDispatcher` - dispatches/submits workflows to be run using a `JobQueueEngine`,
+* `BullMqAdapter` - an implementation of `JobQueueEngine` for **BullMq**.
 
 ## Install
 
