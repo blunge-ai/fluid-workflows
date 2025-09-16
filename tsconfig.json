@@ -23,7 +23,7 @@
     "plugins": [
       { "name": "typescript-eslint-language-service" }
     ],
-    "incremental": true,
+    "incremental": false,
     "outDir": "./dist",
     /* Path Aliases */
     "baseUrl": ".",
