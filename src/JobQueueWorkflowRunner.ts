@@ -61,7 +61,6 @@ export class JobQueueWorkflowRunner<
         );
         const childrenPayload = entries.map(([key, childWorkflow]) => {
           const childQueue = this.config.queueFor(childWorkflow.name as any);
-          assert(childQueue, 'child queue not found');
           return {
             data: {
               id: `${job.id}:step:${stepIndex}:child:${key}`,
@@ -113,10 +112,10 @@ export class JobQueueWorkflowRunner<
   run(queues: 'all' | ValueOf<Qs>[]) {
     const token = uuidv4();
     let stop = false;
-    const allQueues = new Set(Object.values(this.config.queues as unknown as Record<string, string>));
+    const allQueues = new Set(Object.values(this.config.queues as Record<string, string>));
     const queueSet = queues === 'all' ? allQueues : new Set(queues);
     for (const q of queueSet) {
-      if (!allQueues.has(q as string)) {
+      if (!allQueues.has(q)) {
         throw Error('run must be called with a queue that was used to initialise the runner');
       }
     }
@@ -124,24 +123,24 @@ export class JobQueueWorkflowRunner<
       this.config.logger.info({ queue }, 'workflow runner: started');
       while (!stop) {
         try {
-          const { data: job, childResults } = await this.config.engine.acquireJob<WorkflowJobData, unknown, unknown>({ queue: queue as string, token, block: true });
+          const { data: job, childResults } = await this.config.engine.acquireJob<WorkflowJobData, unknown, unknown>({ queue, token, block: true });
           if (job) {
             const jobId = job.id;
             try {
               const workflow = findWorkflow(this.config.allWorkflows, job.input);
               validateWorkflowSteps(workflow, job.input);
-              const [output, status] = await this.runSteps(workflow, job, queue as string, token, childResults);
+              const [output, status] = await this.runSteps(workflow, job, queue, token, childResults);
               if (status === 'suspended') {
                 continue;
               } else if (status === 'success') {
-                await this.config.engine.completeJob({ queue: queue as string, token, jobId, result: { type: 'success', output } });
+                await this.config.engine.completeJob({ queue, token, jobId, result: { type: 'success', output } });
               } else {
                 assertNever(status);
               }
             } catch (err) {
               this.config.logger.error({ err, queue }, 'workflow runner: exception occured when running workflow');
               const reason = `exception when running workflow: ${new String(err)}`;
-              await this.config.engine.completeJob({ queue: queue as string, token, jobId, result: { type: 'error', reason } });
+              await this.config.engine.completeJob({ queue, token, jobId, result: { type: 'error', reason } });
             }
           }
         } catch (err) {

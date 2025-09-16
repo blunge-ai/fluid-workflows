@@ -37,8 +37,8 @@ export class Config<
     }
   }
 
-  queueFor(name: NamesOfWfs<Wfs>): string {
-    const q = (this.queues as unknown as Record<NamesOfWfs<Wfs>, string>)[name];
+  queueFor(name: string): string {
+    const q = (this.queues as Record<string, string>)[name];
     if (!q) {
       throw Error(`queue not found for workflow ${name as string}`);
     }

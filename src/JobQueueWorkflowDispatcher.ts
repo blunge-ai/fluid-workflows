@@ -30,8 +30,7 @@ export class JobQueueWorkflowDispatcher<
     findWorkflow(this.config.allWorkflows, props);
 
     const jobId = opts?.jobId ?? `${props.name}-${uuidv4()}`;
-    const queue = (this.config.queues as unknown as Record<string, string>)[props.name];
-    assert(queue, 'queue not found');
+    const queue = this.config.queueFor(props.name);
 
     const workflowInput = makeWorkflowJobData({ props, input });
     return await this.config.engine.submitJob({
@@ -49,8 +48,7 @@ export class JobQueueWorkflowDispatcher<
     findWorkflow(this.config.allWorkflows, props);
 
     const jobId = opts?.jobId ?? `${props.name}-${uuidv4()}`;
-    const queue = (this.config.queues as unknown as Record<string, string>)[props.name];
-    assert(queue, 'queue not found');
+    const queue = this.config.queueFor(props.name);
 
     const workflowInput = makeWorkflowJobData({ props, input });
 
