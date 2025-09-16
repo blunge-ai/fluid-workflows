@@ -23,7 +23,7 @@ way to run workflows in different processes by scheduling jobs via a queue engin
 npm install @blunge/fluid-workflows
 ```
 
-## Quick Start (Queueless for testing)
+## Quick Start (queueless for testing)
 
 ```ts
 import * as fwf from '@blunge/fluid-workflows';
@@ -36,7 +36,7 @@ const out = await fwf.runQueueless(wf, { a: 2, b: 3 });
 console.log(out.sum); // 5
 ```
 
-## BullMQ (in production)
+## Using job queues
 
 ```ts
 import * as fwf from '@blunge/fluid-workflows';
@@ -62,7 +62,7 @@ const { runner, dispatcher } = fwf.config({
 const stopParent = runner.run(['parent-queue']);
 
 // Possibly on a separate machine, run child workflows
-const stopChild = runner.run([child-queue']);
+const stopChild = runner.run(['child-queue']);
 
 // Alternatively, run all on the same machine
 // const stop = runner.run('all');
