@@ -1,10 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps, collectWorkflows } from './Workflow';
+import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps } from './Workflow';
 import type { JobQueueEngine, JobData, JobResult } from './JobQueueEngine';
 import { timeout, assertNever, assert, Logger, defaultLogger } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
 import type { WorkflowRunner } from './WorkflowRunner';
 import { WfArray, NamesOfWfs, QueuesOption, ValueOf } from './typeHelpers';
+import { Config } from './Config';
 
 export type Opts = {
   logger: Logger,
@@ -22,26 +23,13 @@ export class JobQueueWorkflowRunner<
   private opts: Opts;
   private queuesMap: Record<string, string>;
   private allWorkflows: Workflow<any, any, any>[];
+  private engine: JobQueueEngine;
 
-  constructor(
-    private engine: JobQueueEngine,
-    workflows: Wfs,
-    opts: ConstructorOpts<Wfs, Names, Qs>
-  ) {
-    this.opts = {
-      logger: defaultLogger,
-      ...opts,
-    };
-    this.queuesMap = opts.queues;
-    this.allWorkflows = collectWorkflows(workflows);
-
-    // ensure we have a queue for every workflow that is going to be run
-    // or job that is going to be submitted
-    for (const workflow of this.allWorkflows) {
-      if (!this.queuesMap[workflow.name]) {
-        throw Error(`no queue found workflow ${workflow.name}`);
-      }
-    }
+  constructor(config: Config<Names, Wfs, Qs>) {
+    this.engine = config.engine;
+    this.opts = { logger: config.logger ?? defaultLogger };
+    this.queuesMap = config.queues as unknown as Record<string, string>;
+    this.allWorkflows = config.allWorkflows;
   }
 
   async runSteps<Input, Output>(

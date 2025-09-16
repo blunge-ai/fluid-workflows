@@ -3,6 +3,7 @@ import { Workflow } from '~/Workflow';
 import { JobQueueWorkflowRunner } from '~/JobQueueWorkflowRunner';
 import { JobQueueWorkflowDispatcher } from '~/JobQueueWorkflowDispatcher';
 import { BullMqJobQueueEngine } from '~/BullMqJobQueueEngine';
+import { Config } from '~/Config';
 import { v4 as uuidv4 } from 'uuid';
 import { timeout } from '~/utils';
 
@@ -25,8 +26,9 @@ test('run step', async () => {
       return { c: a + b };
     });
 
-  const runner = new JobQueueWorkflowRunner(engine, [workflow], { queues: { 'add-a-and-b': queue } });
-  const dispatcher = new JobQueueWorkflowDispatcher(engine, [workflow], { queues: { 'add-a-and-b': queue } });
+  const config = new Config({ engine, workflows: [workflow], queues: { 'add-a-and-b': queue } });
+  const runner = new JobQueueWorkflowRunner(config);
+  const dispatcher = new JobQueueWorkflowDispatcher(config);
   const stop = runner.run('all');
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 12, b: 34 });
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -54,8 +56,9 @@ test('run child workflow', async () => {
     });
 
   const queues = { 'parent-workflow': queue, 'child-workflow': queue };
-  const runner = new JobQueueWorkflowRunner(engine, [workflow, child], { queues });
-  const dispatcher = new JobQueueWorkflowDispatcher(engine, [workflow, child], { queues });
+  const config2 = new Config({ engine, workflows: [workflow, child], queues });
+  const runner = new JobQueueWorkflowRunner(config2);
+  const dispatcher = new JobQueueWorkflowDispatcher(config2);
   const stop = runner.run('all');
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { parentInput: 'XX' });
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -94,8 +97,9 @@ test('run two named children', async () => {
     .step(async ({ n }) => ({ out: n }));
 
   const queues = { 'parent-two-children': 'queue-a', child1: 'queue-b', child2: 'queue-c' } as const;
-  const runner = new JobQueueWorkflowRunner(engine, [parent], { queues });
-  const dispatcher = new JobQueueWorkflowDispatcher(engine, [parent], { queues });
+  const config3 = new Config({ engine, workflows: [parent], queues });
+  const runner = new JobQueueWorkflowRunner(config3);
+  const dispatcher = new JobQueueWorkflowDispatcher(config3);
   const stop = runner.run(['queue-a', 'queue-b', 'queue-c']);
   const result = await dispatcher.dispatchAwaitingOutput(parent, { n: 5 });
   await timeout(100);

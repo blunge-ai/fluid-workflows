@@ -1,18 +1,15 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, findWorkflow, collectWorkflows } from './Workflow';
+import { Workflow, findWorkflow } from './Workflow';
 import { makeWorkflowJobData } from './WorkflowJob';
 import type { JobQueueEngine, JobResultStatus } from './JobQueueEngine';
 import { isResultStatus } from './JobQueueEngine';
 import { Logger, defaultLogger, assert } from './utils';
-import { WfArray, NamesOfWfs, QueuesOption } from './typeHelpers';
+import { WfArray, NamesOfWfs } from './typeHelpers';
+import { Config } from './Config';
 
 export type Opts = {
   logger: Logger,
 };
-
-type ConstructorOpts<Wfs extends WfArray<Names>, Names extends string, Qs extends Record<NamesOfWfs<Wfs>, string>>
-  = Partial<Opts>
-  & QueuesOption<Wfs, Names, Qs>;
 
 type MatchingWorkflow<Wf, Names extends string>
   = Wf extends Workflow<any, any, infer N> ? (Exclude<N, Names> extends never ? Wf : never) : never;
@@ -25,25 +22,13 @@ export class JobQueueWorkflowDispatcher<
   private opts: Opts;
   private queuesMap: Record<string, string>;
   private allWorkflows: Workflow<any, any, any>[];
+  private engine: JobQueueEngine;
 
-  constructor(
-    private engine: JobQueueEngine,
-    workflows: Wfs,
-    opts: ConstructorOpts<Wfs, Names, Qs>,
-  ) {
-    this.opts = {
-      logger: defaultLogger,
-      ...opts,
-    };
-    this.queuesMap = opts.queues;
-    this.allWorkflows = collectWorkflows(workflows);
-
-    // ensure we have a queue for every workflow that can be dispatched
-    for (const workflow of this.allWorkflows) {
-      if (!this.queuesMap[workflow.name]) {
-        throw Error(`no queue found workflow ${workflow.name}`);
-      }
-    }
+  constructor(config: Config<Names, Wfs, Qs>) {
+    this.engine = config.engine;
+    this.opts = { logger: config.logger ?? defaultLogger };
+    this.queuesMap = config.queues as unknown as Record<string, string>;
+    this.allWorkflows = config.allWorkflows;
   }
 
   async dispatch<N extends string, Input, Meta = unknown>(

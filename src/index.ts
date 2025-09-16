@@ -11,3 +11,7 @@ export type {
 export {
  JobQueueWorkflowRunner
 } from './JobQueueWorkflowRunner';
+export {
+ JobQueueWorkflowDispatcher
+} from './JobQueueWorkflowDispatcher';
+export { Config } from './Config';
