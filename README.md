@@ -2,7 +2,7 @@
 
 Type-safe workflow composition and job-queue execution with adapters.
 
-The main problem this project attempts to solve is the separation of the workflow implementation and
+The main problem this project attempts to solve is the separation of workflow definition and
 execution.
 
 ## Install
@@ -13,7 +13,7 @@ npm install @blunge/fluid-workflows bullmq ioredis zod
 
 ## Quick Start (queueless for testing)
 
-This define a simple workflow with a single step that adds to numbers togther.
+This defines a simple workflow with a single step that adds two numbers togther.
 
 ```ts
 import * as fwf from '@blunge/fluid-workflows';
@@ -129,7 +129,7 @@ const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
      if (iterations < 10) {
        return restart({ iterations: iterations + 1 });
      }
-     // will skip any following step
+     // will skip any following steps
      return complete({ iterations });
   }))
   .step(async () => {
