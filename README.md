@@ -150,4 +150,4 @@ console.log(out.iterations); // 10
 
 ## License
 
-MIT © blunge-ai
+MIT © Blunge

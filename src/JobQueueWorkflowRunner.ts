@@ -23,7 +23,7 @@ export class JobQueueWorkflowRunner<
     childResults?: Record<string, JobResult<unknown>>,
   ): Promise<[Output | undefined, 'suspended' | 'success']>{
 
-    const runOptions: WorkflowRunOptions<Input> = {
+    const runOptions: WorkflowRunOptions<Input, Output> = {
       progress: async (phase: string, progress: number) => {
         this.config.logger.info({
           workflowName: workflow.name,
@@ -42,7 +42,7 @@ export class JobQueueWorkflowRunner<
       },
       restart: withRestartWrapper,
       complete: withCompleteWrapper,
-    } satisfies WorkflowRunOptions<Input>;
+    } satisfies WorkflowRunOptions<Input, Output>;
 
     let stepIndex = job.input.currentStep;
     let result: unknown = job.input.input;
@@ -58,7 +58,7 @@ export class JobQueueWorkflowRunner<
         if (childResults) {
           throw Error('encountered child results when running step function');
         }
-        const stepFn = step as StepFn<unknown, unknown, Input>;
+        const stepFn = step as StepFn<unknown, unknown, Input, Output>;
         const out = await stepFn(result, runOptions);
         if (isRestartWrapper(out)) {
           result = out.input as Input;
@@ -76,8 +76,8 @@ export class JobQueueWorkflowRunner<
         // handle child or childMap steps
         const entries = (
           step instanceof Workflow
-            ? [['', step]] satisfies [string, Workflow<unknown, unknown>][]
-            : Object.entries(step as Record<string, Workflow<unknown, unknown>>)
+            ? [['', step]] as unknown as [string, Workflow<unknown, unknown>][]
+            : Object.entries(step as unknown as Record<string, Workflow<unknown, unknown>>)
         );
         const childrenPayload = entries.map(([key, childWorkflow]) => {
           const childQueue = this.config.queueFor(childWorkflow.name as any);

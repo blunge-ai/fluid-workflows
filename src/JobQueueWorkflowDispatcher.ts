@@ -11,8 +11,10 @@ export type Opts = {
   logger: Logger,
 };
 
-type MatchingWorkflow<Wf, Names extends string>
-  = Wf extends Workflow<any, any, infer N> ? (Exclude<N, Names> extends never ? Wf : never) : never;
+type MatchingWorkflow<Wf, Names extends string, In, Out, No, Co>
+  = Wf extends Workflow<In, Out, infer N, No, Co>
+  ? (Exclude<N, Names> extends never ? Wf : never)
+  : never;
 
 export class JobQueueWorkflowDispatcher<
   const Names extends NamesOfWfs<Wfs>,
@@ -21,8 +23,8 @@ export class JobQueueWorkflowDispatcher<
 > {
   constructor(public readonly config: Config<Names, Wfs, Qs>) {}
 
-  async dispatch<N extends string, Input, Meta = unknown>(
-    props: MatchingWorkflow<Workflow<Input, any, N>, Names>,
+  async dispatch<N extends string, Input, Out, No, Co, Meta = unknown>(
+    props: MatchingWorkflow<Workflow<Input, Out, N, No, Co>, Names, Input, Out, No, Co>,
     input: Input,
     opts?: { jobId?: string, meta?: Meta },
   ) {
@@ -39,8 +41,8 @@ export class JobQueueWorkflowDispatcher<
     });
   }
   
-  async dispatchAwaitingOutput<const N extends string, Input, Output, Meta = unknown>(
-    props: MatchingWorkflow<Workflow<Input, Output, N>, Names>,
+  async dispatchAwaitingOutput<const N extends string, Input, Output, No, Co, Meta = unknown>(
+    props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
     input: Input,
     opts?: { jobId?: string, meta?: Meta },
   ) {

@@ -14,7 +14,7 @@ export class Config<
   public readonly workflows: Wfs;
   public readonly queues: RequireKeys<Qs, NamesOfWfs<Wfs>>;
   public readonly logger: Logger;
-  public readonly allWorkflows: Workflow<any, any, any>[];
+  public readonly allWorkflows: Workflow<unknown, unknown>[];
 
   constructor(args: {
     engine: JobQueueEngine,
@@ -26,7 +26,7 @@ export class Config<
     this.workflows = args.workflows;
     this.queues = args.queues;
     this.logger = args.logger ?? defaultLogger;
-    this.allWorkflows = collectWorkflows(this.workflows);
+    this.allWorkflows = collectWorkflows(this.workflows as unknown as Workflow<unknown, unknown>[]);
 
     // Ensure there is a queue for every workflow that can be dispatched or run
     const queuesMap = this.queues as unknown as Record<string, string>;

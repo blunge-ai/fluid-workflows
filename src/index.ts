@@ -8,6 +8,7 @@ export type {
  ProgressFn,
  StepFn,
 } from './Workflow';
+
 export {
   withRestartWrapper,
   withCompleteWrapper,

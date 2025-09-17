@@ -1,12 +1,12 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
-import { Workflow, runQueueless, withCompleteWrapper } from '~/Workflow';
+import { Workflow, runQueueless } from '~/Workflow';
 
 test('run step', async () => {
 
   const workflow = Workflow
     .create({ name: 'add-a-and-b', version: 1 })
-    .step(async ({ a, b }) => {
+    .step(async ({ a, b }: { a: number, b: number }) => {
       return { c: a + b };
     });
 
@@ -19,13 +19,13 @@ test('run child workflow', async () => {
 
   const child = Workflow
     .create({ name: 'child-workflow', version: 1 })
-    .step(async ({ childInput }) => {
+    .step(async ({ childInput }: { childInput: string }) => {
       return { childOutput: `child(${childInput})` };
     });
 
   const workflow = Workflow
     .create({ name: 'parent-workflow', version: 1 })
-    .step(async ({ inputString }) => {
+    .step(async ({ inputString }: { inputString: string }) => {
       return { childInput: `input(${inputString})` };
     })
     .childStep(child)

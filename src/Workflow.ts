@@ -6,39 +6,54 @@ export type WorkflowProps = {
   numSteps: number,
 };
 
-export type AnyCompleteFn = <T>(output: T) => CompleteWrapper<T>;
-
-export type WorkflowRunOptions<WfInput> = {
+export type WorkflowRunOptions<WfInput, WfOutput> = {
   progress: ProgressFn,
   restart: RestartFn<WfInput>,
-  complete: AnyCompleteFn,
+  complete: CompleteFn<WfOutput>,
 };
 
-export type ProgressFn = (phase: string, progress: number) => Promise<{ interrupt: boolean }>;
-export type StepFn<Input, Output, WfInput> = (input: Input, runOpts: WorkflowRunOptions<WfInput>) => Promise<Output | RestartWrapper<WfInput> | CompleteWrapper<unknown>>;
+export type ProgressFn
+  = (phase: string, progress: number) => Promise<{ interrupt: boolean }>;
+export type StepFn<Input, Output, WfInput, WfOutput>
+  = (input: Input, runOpts: WorkflowRunOptions<WfInput, WfOutput>) => Promise<Output>;
 
 export type WorkflowNames<W>
-  = W extends Workflow<unknown, unknown, infer N> ? N : never;
+  = W extends Workflow<any, any, infer N, any, any> ? N : never;
 
 type ChildrenMap<Out, Cn extends string>
-  = { [K in keyof Out]: Workflow<Out[K], any, Cn> };
+  = { [K in keyof Out]: Workflow<Out[K], any, Cn, any, any> };
 
 type ExactChildren<Out, Cn extends string, Cm extends ChildrenMap<Out, Cn>>
   = keyof Cm extends keyof Out ? Cm : never;
 
 type OutputsOfChildren<Cm>
-  = { [K in keyof Cm]: Cm[K] extends Workflow<any, infer O, any> ? O : never };
+  = { [K in keyof Cm]: Cm[K] extends Workflow<any, infer O, string, any, any> ? O : never };
 
 type ChildrenNames<Cm>
-  = Cm[keyof Cm] extends Workflow<any, any, infer N> ? N : never;
+  = Cm[keyof Cm] extends Workflow<any, any, infer N, any, any> ? N : never;
 
 // Sentinel type for type-dispatching the first .step() which gives a Workflow its input
 declare const __WF_UNSET__: unique symbol;
 type Unset = typeof __WF_UNSET__;
 
 export type RestartFn<WfInput> = (input: WfInput) => RestartWrapper<WfInput>;
+export type CompleteFn<WfOutput> = <T extends WfOutput>(output: T) => CompleteWrapper<T>;
+
+export type StripSentinel<T> = T extends Unset ? never : T;
+
+export type StripCtrl<StepOutput>
+  = Exclude<StepOutput, RestartWrapper<any> | CompleteWrapper<any>>
+
+type MkCtrlOut<Ctrl, StepOutput>
+  = Ctrl
+  | (StepOutput extends CompleteWrapper<infer U> ? U : never);
+
+type MkOutput<Ctrl, StepOutput>
+  = MkCtrlOut<Ctrl, StepOutput>
+  | StripCtrl<StepOutput>;
 
 export class RestartWrapper<WfInput> {
+  public __type = 'RestartWrapper' as const;
   constructor(public input: WfInput) {}
 }
 
@@ -51,6 +66,7 @@ export function withRestartWrapper<WfInput>(input: WfInput) {
 }
 
 export class CompleteWrapper<WfOutput> {
+  public __type = 'CompleteWrapper' as const;
   constructor(public output: WfOutput) {}
 }
 
@@ -62,18 +78,18 @@ export function withCompleteWrapper<WfOutput>(output: WfOutput) {
   return new CompleteWrapper(output);
 }
 
-export class Workflow<Input = Unset, Output = Unset, const Names extends string = never> implements WorkflowProps {
+export class Workflow<Input = Unset, Output = never, const Names extends string = never, NextOutput = never, CtrlOutput = never> implements WorkflowProps {
   public name: string;
   public version: number;
   public numSteps: number;
   public inputSchema?: ZodTypeAny;
 
   constructor(
-     props: Pick<WorkflowProps, 'name' | 'version'>,
+    props: Pick<WorkflowProps, 'name' | 'version'>,
     public steps: Array<
-      StepFn<unknown, unknown, unknown> |
-      Workflow<unknown, unknown, string> |
-      Record<string, Workflow<unknown, unknown, string>>
+      StepFn<unknown, unknown, unknown, unknown> |
+      Workflow<unknown, unknown, string, any, any> |
+      Record<string, Workflow<unknown, unknown, string, any, any>>
     >,
     inputSchema?: ZodTypeAny,
   ) {
@@ -91,10 +107,21 @@ export class Workflow<Input = Unset, Output = Unset, const Names extends string 
     return new Workflow<unknown, unknown, Name>({ name, version }, [], props.inputSchema) as unknown as Workflow<Unset | z.input<S>, Unset, Name>;
   }
 
-  step<NewOutput, StepInput>(this: Workflow<Unset, Unset, Names>, stepFn: StepFn<StepInput, NewOutput, StepInput>): Workflow<StepInput, NewOutput, Names>;
-  step<NewOutput>(this: Workflow<Input, Unset, Names>, stepFn: StepFn<Input, NewOutput, Input>): Workflow<Input, NewOutput, Names>;
-  step<NewOutput, StepInput>(this: Workflow<Input, StepInput, Names>, stepFn: StepFn<StepInput, NewOutput, Input>): Workflow<Input, NewOutput, Names>;
-  step<NewOutput>(this: Workflow<any, any, Names>, stepFn: StepFn<any, any, any>): Workflow<any, NewOutput, Names> {
+  step<StepInput, StepOutput, SwfOutput>(
+    this: Workflow<Unset, Output, Names, NextOutput, CtrlOutput>,
+    stepFn: StepFn<StepInput, StepOutput, StepInput, SwfOutput>
+  ): Workflow<StepInput, MkOutput<CtrlOutput, StepOutput>, Names, StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
+  step<StepOutput, WfOutput, SwfOutput>(
+    this: Workflow<Input, never, Names, never, never>,
+    stepFn: StepFn<Input, StepOutput, Input, SwfOutput>
+  ): Workflow<Input, MkOutput<CtrlOutput, StepOutput>, Names, StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
+  step<StepInput, StepOutput, SwfOutput>(
+    this: Workflow<Input, Output, Names, StepInput, CtrlOutput>,
+    stepFn: StepFn<StepInput, StepOutput, Input, SwfOutput>
+  ): Workflow<Input, MkOutput<CtrlOutput, StepOutput>, Names, StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
+  step(
+    stepFn: StepFn<any, any, any, any>
+  ): Workflow<any, any, string, any, any> {
     return new Workflow(
       { name: this.name, version: this.version },
       [ ...this.steps, stepFn ],
@@ -107,13 +134,13 @@ export class Workflow<Input = Unset, Output = Unset, const Names extends string 
   childStep<
     ChildOutput,
     const Cn extends string,
-  >(child: Workflow<Output, ChildOutput, Cn>): Workflow<Input, ChildOutput, Names | Cn>;
+  >(child: Workflow<NextOutput, ChildOutput, Cn, any, any>): Workflow<Input, MkOutput<CtrlOutput, ChildOutput>, Names | Cn, ChildOutput, CtrlOutput>;
   // childStep({ child1, child2 })
   childStep<
-    const Cm extends ChildrenMap<Output, Cn>,
+    const Cm extends ChildrenMap<NextOutput, Cn>,
     const Cn extends string,
-  >(childrenMap: ExactChildren<Output, Cn, Cm>): Workflow<Input, OutputsOfChildren<Cm>, Names | ChildrenNames<Cm>>;
-  childStep(childOrChildrenMap: Workflow<any, unknown, string> | Record<string, Workflow<unknown, unknown, string>>): unknown {
+  >(childrenMap: ExactChildren<NextOutput, Cn, Cm>): Workflow<Input, MkOutput<CtrlOutput, OutputsOfChildren<Cm>>, Names | ChildrenNames<Cm>, OutputsOfChildren<Cm>, CtrlOutput>;
+  childStep(childOrChildrenMap: Workflow<any, any, string, any, any> | Record<string, Workflow<any, any, string, any, any>>): Workflow<any, any, string, any, any> {
     return new Workflow(
       { name: this.name, version: this.version },
       [ ...this.steps, childOrChildrenMap  ],
@@ -122,14 +149,14 @@ export class Workflow<Input = Unset, Output = Unset, const Names extends string 
   }
 }
 
-export async function runQueueless<Input, Output>(workflow: Workflow<Input, Output, any>, input: Input): Promise<Output> {
+export async function runQueueless<Input, Output, Names extends string, NextOutput, CtrlOutput>(workflow: Workflow<Input, Output, Names, NextOutput, CtrlOutput>, input: Input) {
   let result: unknown = input;
 
   if (workflow.inputSchema) {
     result = workflow.inputSchema.parse(result);
   }
 
-  const runOptions: WorkflowRunOptions<Input> = {
+  const runOptions: WorkflowRunOptions<Input, Output> = {
     progress: async (phase: string, progress: number) => {
       console.log(`phase: ${phase}, progress: ${progress}`);
       return { interrupt: false };
@@ -142,9 +169,9 @@ export async function runQueueless<Input, Output>(workflow: Workflow<Input, Outp
   while (i < workflow.steps.length) {
     const step = workflow.steps[i];
     if (step instanceof Workflow) {
-      result = await runQueueless(step as Workflow<unknown, unknown, any>, result);
+      result = await runQueueless(step as unknown as Workflow<unknown, unknown, any, any, any>, result);
     } else if (typeof step === 'function') {
-      const stepFn = step as StepFn<unknown, unknown, Input>;
+      const stepFn = step as StepFn<unknown, unknown, Input, Output>;
       const stepResult = await stepFn(result, runOptions);
       if (isRestartWrapper(stepResult)) {
         result = stepResult.input as Input;
@@ -159,10 +186,10 @@ export async function runQueueless<Input, Output>(workflow: Workflow<Input, Outp
       }
       result = stepResult as unknown;
     } else {
-      const children = step as Record<string, Workflow<unknown, unknown, any>>;
+      const children = step as unknown as Record<string, Workflow<unknown, unknown, any, any, any>>;
       const inputRecord = result as Record<string, unknown>;
       const entries = Object.entries(children);
-      const outputs = await Promise.all(entries.map(([key, child]) => runQueueless(child, inputRecord[key])));
+      const outputs = await Promise.all(entries.map(([key, child]) => runQueueless(child as any, inputRecord[key] as any)));
       result = Object.fromEntries(entries.map(([key], i) => [key, outputs[i]]));
     }
 
@@ -180,7 +207,7 @@ export function findWorkflow(workflows: Workflow<unknown, unknown>[], props: Pic
   return workflow;
 }
 
-export function validateWorkflowSteps(workflow: Workflow<unknown, unknown, any>, { totalSteps, currentStep }: { totalSteps: number, currentStep: number }) {
+export function validateWorkflowSteps(workflow: Workflow<unknown, unknown>, { totalSteps, currentStep }: { totalSteps: number, currentStep: number }) {
   if (currentStep >= totalSteps) {
     throw Error(`inconsistent jobData: current step is ${currentStep} but expected value smaller than ${totalSteps}`);
   }
@@ -189,12 +216,12 @@ export function validateWorkflowSteps(workflow: Workflow<unknown, unknown, any>,
   }
 }
 
-export function collectWorkflows(workflows: ReadonlyArray<Workflow<any, any>>): Workflow<any, any>[] {
+export function collectWorkflows(workflows: Workflow<unknown, unknown>[]): Workflow<unknown, unknown>[] {
 
-  const result: Workflow<any, any>[] = [];
+  const result: Workflow<unknown, unknown>[] = [];
   const seen = new Set<string>();
 
-  const visit = (wf: Workflow<any, any>) => {
+  const visit = (wf: Workflow<unknown, unknown>) => {
     const key = `${wf.name}:${wf.version}`;
     if (seen.has(key)) {
       if (!result.includes(wf)) {
@@ -206,13 +233,12 @@ export function collectWorkflows(workflows: ReadonlyArray<Workflow<any, any>>): 
     result.push(wf);
     for (const step of wf.steps) {
       if (step instanceof Workflow) {
-        visit(step as Workflow<any, any>);
+        visit(step as unknown as Workflow<unknown, unknown>);
       } else if (typeof step === 'function') {
         continue;
       } else {
-        const record = step as Record<string, Workflow<any, any>>;
-        for (const child of Object.values(record)) {
-          visit(child);
+        for (const child of Object.values(step)) {
+          visit(child as unknown as Workflow<unknown, unknown>);
         }
       }
     }
