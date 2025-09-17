@@ -9,6 +9,12 @@ export type {
  StepFn,
 } from './Workflow';
 export {
+  withRestartWrapper,
+  withCompleteWrapper,
+  isRestartWrapper,
+  isCompleteWrapper,
+} from './Workflow';
+export {
  JobQueueWorkflowRunner
 } from './JobQueueWorkflowRunner';
 export {

@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper } from './Workflow';
+import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper, isCompleteWrapper, withCompleteWrapper } from './Workflow';
 import type { StepFn } from './Workflow';
 import type { JobData, JobResult } from './JobQueueEngine';
 import { timeout, assertNever, assert } from './utils';
@@ -41,6 +41,7 @@ export class JobQueueWorkflowRunner<
         })
       },
       restart: withRestartWrapper,
+      complete: withCompleteWrapper,
     } satisfies WorkflowRunOptions<Input>;
 
     let stepIndex = job.input.currentStep;
@@ -66,6 +67,9 @@ export class JobQueueWorkflowRunner<
           await this.config.engine.updateJob({ queue, token, jobId: job.id, input });
           childResults = undefined;
           continue;
+        }
+        if (isCompleteWrapper(out)) {
+          return [out.output as Output, 'success'];
         }
         result = out;
       } else {

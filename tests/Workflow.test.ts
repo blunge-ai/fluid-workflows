@@ -1,9 +1,8 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
-import { Workflow, runQueueless } from '~/Workflow';
+import { Workflow, runQueueless, withCompleteWrapper } from '~/Workflow';
 
 test('run step', async () => {
-  // no runner needed for queueless execution
 
   const workflow = Workflow
     .create({ name: 'add-a-and-b', version: 1 })
@@ -17,7 +16,6 @@ test('run step', async () => {
 });
 
 test('run child workflow', async () => {
-  // no runner needed for queueless execution
 
   const child = Workflow
     .create({ name: 'child-workflow', version: 1 })
@@ -41,23 +39,37 @@ test('run child workflow', async () => {
 });
 
 test('zod input schema', async () => {
-  // no runner needed for queueless execution
   const schema = z.object({ a: z.number(), b: z.number() });
 
   const workflow = Workflow
     .create({ name: 'sum-with-zod', version: 1, inputSchema: schema })
-    .step(async (input) => {
+    .step(async (input, { complete }) => {
       const { a, b } = input;
-      return { sum: a + b };
+      return complete({ sum: a + b });
     });
 
   const result = await runQueueless(workflow, { a: 2, b: 3 });
   expect(result.sum).toBe(5);
 });
 
-// New test: restart support in queueless execution
-// Ensures a step can request a restart with new input,
-// loop back to step 0, and eventually produce the final output.
+test('complete finishes the workflow early in runQueueless', async () => {
+  const schema = z.object({ a: z.number(), b: z.number() });
+
+  const workflow = Workflow
+    .create({ name: 'complete-queueless', version: 1, inputSchema: schema })
+    .step(async ({ a, b }, { complete }) => {
+      if (a + b === 5) {
+        return complete({ sum: 5 });
+      }
+      return { sum: a + b };
+    })
+    .step(async () => {
+      return { sum: 9999 };
+    });
+
+  const result = await runQueueless(workflow, { a: 2, b: 3 });
+  expect(result.sum).toBe(5);
+});
 
 test('restart restarts from the beginning in runQueueless', async () => {
   const schema = z.object({ iterations: z.number(), value: z.number() });

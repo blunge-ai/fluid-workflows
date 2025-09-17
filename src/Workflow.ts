@@ -6,13 +6,16 @@ export type WorkflowProps = {
   numSteps: number,
 };
 
+export type AnyCompleteFn = <T>(output: T) => CompleteWrapper<T>;
+
 export type WorkflowRunOptions<WfInput> = {
   progress: ProgressFn,
   restart: RestartFn<WfInput>,
+  complete: AnyCompleteFn,
 };
 
 export type ProgressFn = (phase: string, progress: number) => Promise<{ interrupt: boolean }>;
-export type StepFn<Input, Output, WfInput> = (input: Input, runOpts: WorkflowRunOptions<WfInput>) => Promise<Output | RestartWrapper<WfInput>>;
+export type StepFn<Input, Output, WfInput> = (input: Input, runOpts: WorkflowRunOptions<WfInput>) => Promise<Output | RestartWrapper<WfInput> | CompleteWrapper<unknown>>;
 
 export type WorkflowNames<W>
   = W extends Workflow<unknown, unknown, infer N> ? N : never;
@@ -35,8 +38,8 @@ type Unset = typeof __WF_UNSET__;
 
 export type RestartFn<WfInput> = (input: WfInput) => RestartWrapper<WfInput>;
 
-export class RestartWrapper<T> {
-  constructor(public input: T) {}
+export class RestartWrapper<WfInput> {
+  constructor(public input: WfInput) {}
 }
 
 export function isRestartWrapper(value: unknown): value is RestartWrapper<unknown> {
@@ -45,6 +48,18 @@ export function isRestartWrapper(value: unknown): value is RestartWrapper<unknow
 
 export function withRestartWrapper<WfInput>(input: WfInput) {
   return new RestartWrapper(input);
+}
+
+export class CompleteWrapper<WfOutput> {
+  constructor(public output: WfOutput) {}
+}
+
+export function isCompleteWrapper(value: unknown): value is CompleteWrapper<unknown> {
+  return value instanceof CompleteWrapper;
+}
+
+export function withCompleteWrapper<WfOutput>(output: WfOutput) {
+  return new CompleteWrapper(output);
 }
 
 export class Workflow<Input = Unset, Output = Unset, const Names extends string = never> implements WorkflowProps {
@@ -120,6 +135,7 @@ export async function runQueueless<Input, Output>(workflow: Workflow<Input, Outp
       return { interrupt: false };
     },
     restart: withRestartWrapper,
+    complete: withCompleteWrapper,
   };
 
   let i = 0;
@@ -137,6 +153,9 @@ export async function runQueueless<Input, Output>(workflow: Workflow<Input, Outp
         }
         i = 0;
         continue;
+      }
+      if (isCompleteWrapper(stepResult)) {
+        return stepResult.output as Output;
       }
       result = stepResult as unknown;
     } else {

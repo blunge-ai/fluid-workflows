@@ -33,6 +33,14 @@ export function assert(condition: any, msg?: string): asserts condition {
   }
 }
 
+export function mapValues<I, O>(map: Record<string, I>, fn: (value: I) => O) {
+  const result: Record<string, O> = {};
+  for (const [key, value] of Object.entries(map)) {
+    result[key] = fn(value);
+  }
+  return result;
+}
+
 export type Logger = {
   error: (data: Record<string, unknown>, message: string) => void,
   warn: (data: Record<string, unknown>, message: string) => void,
