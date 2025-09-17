@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps } from './Workflow';
+import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper } from './Workflow';
+import type { StepFn } from './Workflow';
 import type { JobData, JobResult } from './JobQueueEngine';
 import { timeout, assertNever, assert } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
@@ -21,15 +22,8 @@ export class JobQueueWorkflowRunner<
     token: string,
     childResults?: Record<string, JobResult<unknown>>,
   ): Promise<[Output | undefined, 'suspended' | 'success']>{
-    let stepIndex = job.input.currentStep;
-    const steps = workflow.steps.slice(stepIndex);
-    let result: unknown = job.input.input;
 
-    if (stepIndex === 0 && workflow.inputSchema) {
-      result = workflow.inputSchema.parse(result);
-    }
-
-    const runOptions = {
+    const runOptions: WorkflowRunOptions<Input> = {
       progress: async (phase: string, progress: number) => {
         this.config.logger.info({
           workflowName: workflow.name,
@@ -46,14 +40,36 @@ export class JobQueueWorkflowRunner<
           progressInfo: { phase, progress } satisfies WorkflowProgressInfo
         })
       },
-    } satisfies WorkflowRunOptions;
+      restart: withRestartWrapper,
+    } satisfies WorkflowRunOptions<Input>;
 
-    for (const step of steps) {
+    let stepIndex = job.input.currentStep;
+    let result: unknown = job.input.input;
+
+    while (stepIndex < workflow.steps.length) {
+      if (stepIndex === 0 && workflow.inputSchema) {
+        result = workflow.inputSchema.parse(result);
+      }
+
+      const step = workflow.steps[stepIndex];
       if (typeof step === 'function' && !(step instanceof Workflow)) {
         // handle step function
-        result = await step(result, runOptions);
+        if (childResults) {
+          throw Error('encountered child results when running step function');
+        }
+        const stepFn = step as StepFn<unknown, unknown, Input>;
+        const out = await stepFn(result, runOptions);
+        if (isRestartWrapper(out)) {
+          result = out.input as Input;
+          stepIndex = 0;
+          const input = { ...job.input, input: result as Input, currentStep: stepIndex } satisfies WorkflowJobData<Input>;
+          await this.config.engine.updateJob({ queue, token, jobId: job.id, input });
+          childResults = undefined;
+          continue;
+        }
+        result = out;
       } else {
-        // handle child or childMap workflows
+        // handle child or childMap steps
         const entries = (
           step instanceof Workflow
             ? [['', step]] satisfies [string, Workflow<unknown, unknown>][]
@@ -102,8 +118,8 @@ export class JobQueueWorkflowRunner<
       stepIndex += 1;
       // the result of the last step will be used to complete the job and doesn't need to be persisted
       if (stepIndex !== workflow.steps.length) {
-        const newInput = { ...job.input, input: result as Input, currentStep: stepIndex } satisfies WorkflowJobData<Input>;
-        await this.config.engine.updateJob({ queue, token, jobId: job.id, input: newInput });
+        const input = { ...job.input, input: result as Input, currentStep: stepIndex } satisfies WorkflowJobData<Input>;
+        await this.config.engine.updateJob({ queue, token, jobId: job.id, input });
       }
     }
     return [result as Output, 'success'];

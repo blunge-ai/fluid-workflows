@@ -54,3 +54,26 @@ test('zod input schema', async () => {
   const result = await runQueueless(workflow, { a: 2, b: 3 });
   expect(result.sum).toBe(5);
 });
+
+// New test: restart support in queueless execution
+// Ensures a step can request a restart with new input,
+// loop back to step 0, and eventually produce the final output.
+
+test('restart restarts from the beginning in runQueueless', async () => {
+  const schema = z.object({ iterations: z.number(), value: z.number() });
+
+  const workflow = Workflow
+    .create({ name: 'restart-queueless', version: 1, inputSchema: schema })
+    .step(async (input, { restart }) => {
+      if (input.iterations > 0) {
+        return restart({ iterations: input.iterations - 1, value: input.value + 1 });
+      }
+      return { after: input.value };
+    })
+    .step(async ({ after }) => {
+      return { out: after };
+    });
+
+  const result = await runQueueless(workflow, { iterations: 3, value: 10 });
+  expect(result.out).toBe(13);
+});

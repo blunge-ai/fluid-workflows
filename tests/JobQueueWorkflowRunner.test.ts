@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest'
+import { z } from 'zod';
 import { Workflow } from '~/Workflow';
 import { JobQueueWorkflowRunner } from '~/JobQueueWorkflowRunner';
 import { JobQueueWorkflowDispatcher } from '~/JobQueueWorkflowDispatcher';
@@ -106,4 +107,31 @@ test('run two named children', async () => {
   await stop();
 
   expect(result.out).toBe('12-child2(n=5)');
+});
+
+test('restart restarts from the beginning in JobQueueWorkflowRunner', async () => {
+  const { engine, queue } = setup();
+
+  const schema = z.object({ iterations: z.number(), value: z.number() });
+
+  const workflow = Workflow
+    .create({ name: 'restart-runner', version: 1, inputSchema: schema })
+    .step(async (input, { restart }) => {
+      if (input.iterations > 0) {
+        return restart({ iterations: input.iterations - 1, value: input.value + 1 });
+      }
+      return { after: input.value };
+    })
+    .step(async ({ after }) => {
+      return { out: after };
+    });
+
+  const config = new Config({ engine, workflows: [workflow], queues: { 'restart-runner': queue } });
+  const runner = new JobQueueWorkflowRunner(config);
+  const dispatcher = new JobQueueWorkflowDispatcher(config);
+  const stop = runner.run('all');
+  const result = await dispatcher.dispatchAwaitingOutput(workflow, { iterations: 3, value: 10 });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  await stop();
+  expect(result.out).toBe(13);
 });

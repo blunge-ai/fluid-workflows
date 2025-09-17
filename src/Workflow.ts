@@ -6,12 +6,13 @@ export type WorkflowProps = {
   numSteps: number,
 };
 
-export type WorkflowRunOptions = {
+export type WorkflowRunOptions<WfInput> = {
   progress: ProgressFn,
+  restart: RestartFn<WfInput>,
 };
 
 export type ProgressFn = (phase: string, progress: number) => Promise<{ interrupt: boolean }>;
-export type StepFn<Input, Output> = (input: Input, runOpts: WorkflowRunOptions) => Promise<Output>;
+export type StepFn<Input, Output, WfInput> = (input: Input, runOpts: WorkflowRunOptions<WfInput>) => Promise<Output | RestartWrapper<WfInput>>;
 
 export type WorkflowNames<W>
   = W extends Workflow<unknown, unknown, infer N> ? N : never;
@@ -23,7 +24,7 @@ type ExactChildren<Out, Cn extends string, Cm extends ChildrenMap<Out, Cn>>
   = keyof Cm extends keyof Out ? Cm : never;
 
 type OutputsOfChildren<Cm>
-  = { [K in keyof Cm]: Cm[K] extends Workflow<unknown, infer O, string> ? O : never };
+  = { [K in keyof Cm]: Cm[K] extends Workflow<any, infer O, any> ? O : never };
 
 type ChildrenNames<Cm>
   = Cm[keyof Cm] extends Workflow<any, any, infer N> ? N : never;
@@ -31,6 +32,20 @@ type ChildrenNames<Cm>
 // Sentinel type for type-dispatching the first .step() which gives a Workflow its input
 declare const __WF_UNSET__: unique symbol;
 type Unset = typeof __WF_UNSET__;
+
+export type RestartFn<WfInput> = (input: WfInput) => RestartWrapper<WfInput>;
+
+export class RestartWrapper<T> {
+  constructor(public input: T) {}
+}
+
+export function isRestartWrapper(value: unknown): value is RestartWrapper<unknown> {
+  return value instanceof RestartWrapper;
+}
+
+export function withRestartWrapper<WfInput>(input: WfInput) {
+  return new RestartWrapper(input);
+}
 
 export class Workflow<Input = Unset, Output = Unset, const Names extends string = never> implements WorkflowProps {
   public name: string;
@@ -41,7 +56,7 @@ export class Workflow<Input = Unset, Output = Unset, const Names extends string 
   constructor(
      props: Pick<WorkflowProps, 'name' | 'version'>,
     public steps: Array<
-      StepFn<unknown, unknown> |
+      StepFn<unknown, unknown, unknown> |
       Workflow<unknown, unknown, string> |
       Record<string, Workflow<unknown, unknown, string>>
     >,
@@ -61,10 +76,10 @@ export class Workflow<Input = Unset, Output = Unset, const Names extends string 
     return new Workflow<unknown, unknown, Name>({ name, version }, [], props.inputSchema) as unknown as Workflow<Unset | z.input<S>, Unset, Name>;
   }
 
-  step<NewOutput, StepInput>(this: Workflow<Unset, Unset, Names>, stepFn: StepFn<StepInput, NewOutput>): Workflow<StepInput, NewOutput, Names>;
-  step<NewOutput>(this: Workflow<Input, Unset, Names>, stepFn: StepFn<Input, NewOutput>): Workflow<Input, NewOutput, Names>;
-  step<NewOutput, StepInput>(this: Workflow<Input, StepInput, Names>, stepFn: StepFn<StepInput, NewOutput>): Workflow<Input, NewOutput, Names>;
-  step<NewOutput, StepInput>(this: Workflow<Unset | unknown, Unset | StepInput, Names>, stepFn: StepFn<any, any>): Workflow<any, NewOutput, Names> {
+  step<NewOutput, StepInput>(this: Workflow<Unset, Unset, Names>, stepFn: StepFn<StepInput, NewOutput, StepInput>): Workflow<StepInput, NewOutput, Names>;
+  step<NewOutput>(this: Workflow<Input, Unset, Names>, stepFn: StepFn<Input, NewOutput, Input>): Workflow<Input, NewOutput, Names>;
+  step<NewOutput, StepInput>(this: Workflow<Input, StepInput, Names>, stepFn: StepFn<StepInput, NewOutput, Input>): Workflow<Input, NewOutput, Names>;
+  step<NewOutput>(this: Workflow<any, any, Names>, stepFn: StepFn<any, any, any>): Workflow<any, NewOutput, Names> {
     return new Workflow(
       { name: this.name, version: this.version },
       [ ...this.steps, stepFn ],
@@ -83,7 +98,7 @@ export class Workflow<Input = Unset, Output = Unset, const Names extends string 
     const Cm extends ChildrenMap<Output, Cn>,
     const Cn extends string,
   >(childrenMap: ExactChildren<Output, Cn, Cm>): Workflow<Input, OutputsOfChildren<Cm>, Names | ChildrenNames<Cm>>;
-  childStep(childOrChildrenMap: Workflow<unknown, unknown, string>): unknown {
+  childStep(childOrChildrenMap: Workflow<any, unknown, string> | Record<string, Workflow<unknown, unknown, string>>): unknown {
     return new Workflow(
       { name: this.name, version: this.version },
       [ ...this.steps, childOrChildrenMap  ],
@@ -99,18 +114,31 @@ export async function runQueueless<Input, Output>(workflow: Workflow<Input, Outp
     result = workflow.inputSchema.parse(result);
   }
 
-  const runOptions = {
+  const runOptions: WorkflowRunOptions<Input> = {
     progress: async (phase: string, progress: number) => {
       console.log(`phase: ${phase}, progress: ${progress}`);
       return { interrupt: false };
     },
-  } satisfies WorkflowRunOptions;
+    restart: withRestartWrapper,
+  };
 
-  for (const step of workflow.steps) {
+  let i = 0;
+  while (i < workflow.steps.length) {
+    const step = workflow.steps[i];
     if (step instanceof Workflow) {
       result = await runQueueless(step as Workflow<unknown, unknown, any>, result);
     } else if (typeof step === 'function') {
-      result = await step(result, runOptions);
+      const stepFn = step as StepFn<unknown, unknown, Input>;
+      const stepResult = await stepFn(result, runOptions);
+      if (isRestartWrapper(stepResult)) {
+        result = stepResult.input as Input;
+        if (workflow.inputSchema) {
+          result = workflow.inputSchema.parse(result);
+        }
+        i = 0;
+        continue;
+      }
+      result = stepResult as unknown;
     } else {
       const children = step as Record<string, Workflow<unknown, unknown, any>>;
       const inputRecord = result as Record<string, unknown>;
@@ -118,6 +146,8 @@ export async function runQueueless<Input, Output>(workflow: Workflow<Input, Outp
       const outputs = await Promise.all(entries.map(([key, child]) => runQueueless(child, inputRecord[key])));
       result = Object.fromEntries(entries.map(([key], i) => [key, outputs[i]]));
     }
+
+    i += 1;
   }
   return result as Output;
 }

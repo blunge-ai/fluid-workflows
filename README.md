@@ -5,18 +5,6 @@ Type-safe workflow composition and job-queue execution with adapters.
 The main problem this project attempts to solve is the separation of the workflow implementation and
 execution.
 
-The implementation part is provided by the `Workflow` class, which provides a DSL or builder
-pattern to define the individual steps of a workflow.
-
-The execution part is currently provided by either the `runQueueless()` function, which is a simple
-in-process loop that calls the individual step functions, or the `JobQueue*` classes which provide a
-way to run workflows in different processes by scheduling jobs via a queue engine.
-
-* `JobQueueEngine` - interface that allows adapters for multiple queueing engines to be implemented,
-* `JobQueueWorkflowRunner` - runs/executes workflows using a `JobQueueEngine`, usually in a worker process,
-* `JobQueueWorkflowDispatcher` - dispatches/submits workflows to be run using a `JobQueueEngine`, usually on the app server,
-* `BullMqAdapter` - an implementation of `JobQueueEngine` for **BullMq**.
-
 ## Install
 
 ```bash
@@ -24,6 +12,8 @@ npm install @blunge/fluid-workflows bullmq ioredis zod
 ```
 
 ## Quick Start (queueless for testing)
+
+This define a simple workflow with a single step that adds to numbers togther.
 
 ```ts
 import * as fwf from '@blunge/fluid-workflows';
@@ -51,7 +41,7 @@ export REDIS_URL=redis://127.0.0.1:6379 npm run test
 ```ts
 import * as fwf from '@blunge/fluid-workflows';
 
-// Workflows definitions
+// Workflow definitions
 
 const child = fwf.workflow({ name: 'child', version: 1 })
   .step(async ({ s }: { s: string }) => ({ s2: `child(${s})` }));
@@ -75,8 +65,8 @@ const stopParent = runner.run(['parent-queue']);
 // Possibly on a separate machine, run child workflows
 const stopChild = runner.run(['child-queue']);
 
-// Alternatively, run all on the same machine
-// const stop = runner.run('all');
+// Alternatively, run all workflows on the same machine
+// const stopAll = runner.run('all');
 
 // On the app server, dispatch workflows and optionally await the output
 const result = await dispatcher.dispatchAwaitingOutput(parent, { n: 5 });
@@ -130,6 +120,33 @@ const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
      ...
   }));
 ```
+
+### Control flow
+
+```ts
+const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
+  .step(async ({ iterations }, { restart, complete }) => ({
+     if (iterations < 10) {
+       return restart({ iterations: iterations + 1 });
+     }
+     // will skip any following step
+     return complete({ iterations });
+  }))
+  .step(async () => {
+     // will never reach here
+  });
+
+const out = await fwf.runQueueless(wf, { iterations: 0 });
+console.log(out.iterations); // 10
+```
+
+## Implementation details
+
+* `Workflow` a builder pattern API to define the individual steps of a workflow,
+* `JobQueueEngine` - interface that allows adapters for multiple queueing engines to be implemented,
+* `JobQueueWorkflowRunner` - runs/executes workflows using a `JobQueueEngine`, usually in a worker process,
+* `JobQueueWorkflowDispatcher` - dispatches/submits workflows to be run using a `JobQueueEngine`, usually on the app server,
+* `BullMqAdapter` - an implementation of `JobQueueEngine` for **BullMq**.
 
 ## License
 
