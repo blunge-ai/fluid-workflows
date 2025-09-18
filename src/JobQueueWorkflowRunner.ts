@@ -23,49 +23,45 @@ export class JobQueueWorkflowRunner<
     childResults?: Record<string, JobResult<unknown>>,
   ): Promise<[Output | undefined, 'suspended' | 'success']>{
 
-    const runOptions: WorkflowRunOptions<Input, Output> = {
-      progress: async (phase: string, progress: number) => {
+    const runOptions: WorkflowRunOptions<Input, Output, unknown> = {
+      progress: async (progressInfo: WorkflowProgressInfo) => {
         this.config.logger.info({
           workflowName: workflow.name,
           workflowVersion: workflow.version,
-          phase,
-          progress,
+          progressInfo,
           queue,
           jobId: job.id,
         }, 'workflow runner: progress');
-        return await this.config.engine.updateJob({
-          queue,
-          token,
-          jobId: job.id,
-          progressInfo: { phase, progress } satisfies WorkflowProgressInfo
-        })
+        return await this.config.engine.updateJob({ queue, token, jobId: job.id, progressInfo })
+      },
+      update: async (stepInput: unknown, progressInfo?: WorkflowProgressInfo) => {
+        const input = { ...job.input, input: stepInput as any, currentStep } satisfies WorkflowJobData<Input>;
+        return await this.config.engine.updateJob({ queue, token, jobId: job.id, input, progressInfo });
       },
       restart: withRestartWrapper,
       complete: withCompleteWrapper,
-    } satisfies WorkflowRunOptions<Input, Output>;
+    };
 
-    let stepIndex = job.input.currentStep;
+    let currentStep = job.input.currentStep;
     let result: unknown = job.input.input;
 
-    while (stepIndex < workflow.steps.length) {
-      if (stepIndex === 0 && workflow.inputSchema) {
+    while (currentStep < workflow.steps.length) {
+      if (currentStep === 0 && workflow.inputSchema) {
         result = workflow.inputSchema.parse(result);
       }
 
-      const step = workflow.steps[stepIndex];
+      const step = workflow.steps[currentStep];
       if (typeof step === 'function' && !(step instanceof Workflow)) {
         // handle step function
         if (childResults) {
-          throw Error('encountered child results when running step function');
+          throw Error('encountered child results when running a step function');
         }
         const stepFn = step as StepFn<unknown, unknown, Input, Output>;
         const out = await stepFn(result, runOptions);
         if (isRestartWrapper(out)) {
           result = out.input as Input;
-          stepIndex = 0;
-          const input = { ...job.input, input: result as Input, currentStep: stepIndex } satisfies WorkflowJobData<Input>;
-          await this.config.engine.updateJob({ queue, token, jobId: job.id, input });
-          childResults = undefined;
+          currentStep = 0;
+          await runOptions.update(result);
           continue;
         }
         if (isCompleteWrapper(out)) {
@@ -83,7 +79,7 @@ export class JobQueueWorkflowRunner<
           const childQueue = this.config.queueFor(childWorkflow.name as any);
           return {
             data: {
-              id: `${job.id}:step:${stepIndex}:child:${key}`,
+              id: `${job.id}:step:${currentStep}:child:${key}`,
               input: makeWorkflowJobData({
                 props: childWorkflow,
                 input: key === '' ? result : (result as Record<string, unknown>)[key]
@@ -108,7 +104,7 @@ export class JobQueueWorkflowRunner<
         // unwrap results
         const outputs = Object.fromEntries(entries.map(([key]) => {
           assert(childResults);
-          const childResult = childResults[`${job.id}:step:${stepIndex}:child:${key}`];
+          const childResult = childResults[`${job.id}:step:${currentStep}:child:${key}`];
           assert(childResult);
           if (childResult.type !== 'success') {
             throw Error('error running child job');
@@ -119,11 +115,10 @@ export class JobQueueWorkflowRunner<
         result = step instanceof Workflow ? outputs[''] : outputs;
       }
 
-      stepIndex += 1;
+      currentStep += 1;
       // the result of the last step will be used to complete the job and doesn't need to be persisted
-      if (stepIndex !== workflow.steps.length) {
-        const input = { ...job.input, input: result as Input, currentStep: stepIndex } satisfies WorkflowJobData<Input>;
-        await this.config.engine.updateJob({ queue, token, jobId: job.id, input });
+      if (currentStep !== workflow.steps.length) {
+        await runOptions.update(result);
       }
     }
     return [result as Output, 'success'];

@@ -1,4 +1,5 @@
 import { z, type ZodTypeAny } from 'zod';
+import { WorkflowProgressInfo } from './WorkflowJob';
 
 export type WorkflowProps = {
   name: string,
@@ -6,16 +7,19 @@ export type WorkflowProps = {
   numSteps: number,
 };
 
-export type WorkflowRunOptions<WfInput, WfOutput> = {
+export type WorkflowRunOptions<WfInput, WfOutput, StepInput> = {
   progress: ProgressFn,
+  update: UpdateFn<StepInput>,
   restart: RestartFn<WfInput>,
   complete: CompleteFn<WfOutput>,
 };
 
 export type ProgressFn
-  = (phase: string, progress: number) => Promise<{ interrupt: boolean }>;
+  = (progressInfo: WorkflowProgressInfo) => Promise<{ interrupt: boolean }>;
+export type UpdateFn<StepInput>
+  = (stepInput: StepInput, progressInfo?: WorkflowProgressInfo) => Promise<{ interrupt: boolean }>;
 export type StepFn<Input, Output, WfInput, WfOutput>
-  = (input: Input, runOpts: WorkflowRunOptions<WfInput, WfOutput>) => Promise<Output>;
+  = (input: Input, runOpts: WorkflowRunOptions<WfInput, WfOutput, Input>) => Promise<Output>;
 
 export type WorkflowNames<W>
   = W extends Workflow<any, any, infer N, any, any> ? N : never;
@@ -156,18 +160,25 @@ export async function runQueueless<Input, Output, Names extends string, NextOutp
     result = workflow.inputSchema.parse(result);
   }
 
-  const runOptions: WorkflowRunOptions<Input, Output> = {
-    progress: async (phase: string, progress: number) => {
-      console.log(`phase: ${phase}, progress: ${progress}`);
+  let stepIndex = 0;
+
+  const runOptions: WorkflowRunOptions<Input, Output, unknown> = {
+    progress: async (progressInfo: WorkflowProgressInfo) => {
+      console.log(`progress: ${JSON.stringify(progressInfo)}`);
+      return { interrupt: false };
+    },
+    update: async (_stepInput: unknown, progressInfo?: WorkflowProgressInfo) => {
+      if (progressInfo) {
+        console.log(`progress: ${JSON.stringify(progressInfo)}`);
+      }
       return { interrupt: false };
     },
     restart: withRestartWrapper,
     complete: withCompleteWrapper,
   };
 
-  let i = 0;
-  while (i < workflow.steps.length) {
-    const step = workflow.steps[i];
+  while (stepIndex < workflow.steps.length) {
+    const step = workflow.steps[stepIndex];
     if (step instanceof Workflow) {
       result = await runQueueless(step as unknown as Workflow<unknown, unknown, any, any, any>, result);
     } else if (typeof step === 'function') {
@@ -178,7 +189,7 @@ export async function runQueueless<Input, Output, Names extends string, NextOutp
         if (workflow.inputSchema) {
           result = workflow.inputSchema.parse(result);
         }
-        i = 0;
+        stepIndex = 0;
         continue;
       }
       if (isCompleteWrapper(stepResult)) {
@@ -193,7 +204,7 @@ export async function runQueueless<Input, Output, Names extends string, NextOutp
       result = Object.fromEntries(entries.map(([key], i) => [key, outputs[i]]));
     }
 
-    i += 1;
+    stepIndex += 1;
   }
   return result as Output;
 }

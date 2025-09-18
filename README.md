@@ -123,6 +123,12 @@ const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
 
 ### Control flow
 
+`restart` - allows a workflow to be restarted with new input data
+`complete` - allows the workflow to be completed early with the given result
+
+The control flow functions only wrap the argument and return it, and the wrapped result has to be
+returned by the step to indicate to the workflow runner what shoud happen next.
+
 ```ts
 const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
   .step(async ({ iterations }, { restart, complete }) => ({
@@ -139,6 +145,41 @@ const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
 const out = await fwf.runQueueless(wf, { iterations: 0 });
 console.log(out.iterations); // 10
 ```
+
+### progress and update
+
+__this is work in progress__
+
+The `progress` function allows progress to be reported. Progress events can be subscribed to through
+the `engine`. If the `progress` function returns a true value for `cancelled`, the step should return
+or throw an `Error`. Cancelling a workflow that is in progress is informational only, and the
+workflow can run to successful completion even after it has been cancelled.
+
+The `update` function allows the step's input data to be updated, such that if the step does not run
+to completion, it will be retried with the updated input data. Progress can also be reported through
+the update function by passing an optional second argument.
+
+```ts
+const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
+  .step(async ({ iterations }, { progress, update }) => ({
+     for (; iterations > 0; iterations--) {
+
+       // by convention we pass a value from 0 to 1 to report the current progress
+       const progress = 1 / (1 + Math.exp(-k * x));
+
+       // calling update here updates the input data; the optional second argument reports the current progress
+       const { cancelled } = await update({ iterations }, { progress });
+
+       // or just report progress, without updating the step's input data
+       // const { cancelled } = await progress({ progress });
+
+       if (cancelled) {
+         throw Error('cancelled');
+       }
+     }
+  }));
+```
+
 
 ## Implementation details
 
