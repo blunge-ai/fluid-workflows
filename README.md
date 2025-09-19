@@ -161,11 +161,11 @@ the update function by passing an optional second argument.
 
 ```ts
 const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
-  .step(async ({ iterations }, { progress, update }) => ({
+  .step(async ({ iterations, maxIterations }, { progress, update }) => ({
      for (; iterations > 0; iterations--) {
 
        // by convention we pass a value from 0 to 1 to report the current progress
-       const progress = 1 / (1 + Math.exp(-k * x));
+       const progress = Math.min(1, iterations / maxIterations);
 
        // calling update here updates the input data; the optional second argument reports the current progress
        const { cancelled } = await update({ iterations }, { progress });
