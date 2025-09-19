@@ -124,6 +124,26 @@ export class JobQueueWorkflowRunner<
     return [result as Output, 'success'];
   }
 
+  async runJob(job: JobData<WorkflowJobData, unknown>, { childResults, queue, token }: { childResults?: Record<string, JobResult<unknown>>, queue: string, token: string }, ) {
+    const jobId = job.id;
+    try {
+      const workflow = findWorkflow(this.config.allWorkflows, job.input);
+      validateWorkflowSteps(workflow, job.input);
+      const [output, status] = await this.runSteps(workflow, job, queue, token, childResults);
+      if (status === 'suspended') {
+        return;
+      } else if (status === 'success') {
+        await this.config.engine.completeJob({ queue, token, jobId, result: { type: 'success', output } });
+      } else {
+        assertNever(status);
+      }
+    } catch (err) {
+      this.config.logger.error({ err, queue }, 'workflow runner: exception occured when running workflow');
+      const reason = `exception when running workflow: ${new String(err)}`;
+      await this.config.engine.completeJob({ queue, token, jobId, result: { type: 'error', reason } });
+    }
+  }
+
   run(queues: 'all' | ValueOf<Qs>[]) {
     const token = uuidv4();
     let stop = false;
@@ -140,27 +160,11 @@ export class JobQueueWorkflowRunner<
         try {
           const { data: job, childResults } = await this.config.engine.acquireJob<WorkflowJobData, unknown, unknown>({ queue, token, block: true });
           if (job) {
-            const jobId = job.id;
-            try {
-              const workflow = findWorkflow(this.config.allWorkflows, job.input);
-              validateWorkflowSteps(workflow, job.input);
-              const [output, status] = await this.runSteps(workflow, job, queue, token, childResults);
-              if (status === 'suspended') {
-                continue;
-              } else if (status === 'success') {
-                await this.config.engine.completeJob({ queue, token, jobId, result: { type: 'success', output } });
-              } else {
-                assertNever(status);
-              }
-            } catch (err) {
-              this.config.logger.error({ err, queue }, 'workflow runner: exception occured when running workflow');
-              const reason = `exception when running workflow: ${new String(err)}`;
-              await this.config.engine.completeJob({ queue, token, jobId, result: { type: 'error', reason } });
-            }
+            await this.runJob(job, { childResults, queue, token });
           }
         } catch (err) {
-          this.config.logger.error({ err, queue }, 'workflow runner: exception occured while running worker loop; sleeping 1s before continuing');
-          await timeout(1000);
+          this.config.logger.error({ err, queue }, 'workflow runner: exception occured while running worker loop; sleeping 10s before continuing');
+          await timeout(10000);
         }
       }
       this.config.logger.info({ queue }, 'workflow runner: stopped');

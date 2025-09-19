@@ -80,7 +80,7 @@ export interface JobQueueEngine {
     statusHandler: (status: JobStatus<Meta, ProgressInfo>) => void
   }): Promise<() => Promise<void>>;
 
-  acquireJob<Input, Meta, ChildOutput>(opts: {
+  acquireJob<Input, Meta = unknown, ChildOutput = unknown>(opts: {
     queue: string,
     token: string,
     block?: boolean
@@ -110,7 +110,7 @@ export interface JobQueueEngine {
     delete?: boolean
   }): Promise<JobResult<Output>>;
 
-  submitChildrenSuspendParent<ChildOutput>(opts: {
+  submitChildrenSuspendParent<ChildOutput = unknown>(opts: {
     children: {
       data: JobData<unknown, unknown>,
       queue: string
