@@ -33,7 +33,7 @@ To use the `BullMQAdapter` you need to have redis running and the `REDIS_URL` en
 For example, to run tests:
 
 ```bash
-export REDIS_URL=redis://127.0.0.1:6379 npm run test
+REDIS_URL=redis://127.0.0.1:6379 npm run test
 ```
 
 ## Using job queues
@@ -123,8 +123,8 @@ const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
 
 ### Control flow
 
-`restart` - allows a workflow to be restarted with new input data
-`complete` - allows the workflow to be completed early with the given result
+* `restart` - allows a workflow to be restarted with new input data
+* `complete` - allows the workflow to be completed early with the given result
 
 The control flow functions only wrap the argument and return it, and the wrapped result has to be
 returned by the step to indicate to the workflow runner what shoud happen next.
