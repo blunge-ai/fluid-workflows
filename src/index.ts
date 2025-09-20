@@ -23,6 +23,7 @@ export {
 } from './JobQueueWorkflowDispatcher';
 export { Config } from './Config';
 export { BullMqAdapter } from './BullMqAdapter';
+export { InProcessWorkflowRunner } from './InProcessWorkflowRunner';
 export { InMemoryJobQueueAdapter } from './InMemoryJobQueueAdapter';
 export { HttpJobQueueEngineClient } from './HttpJobQueueEngineClient';
 export { HttpJobQueueEngineServer } from './HttpJobQueueEngineServer';

@@ -16,3 +16,8 @@ export type QueuesOption<
 > = { readonly queues: RequireKeys<Qs, NamesOfWfs<Wfs>> };
 
 export type ValueOf<T> = T[keyof T];
+
+export type MatchingWorkflow<Wf, Names extends string, In, Out, No, Co>
+  = Wf extends Workflow<In, Out, infer N, No, Co>
+  ? (Exclude<N, Names> extends never ? Wf : never)
+  : never;

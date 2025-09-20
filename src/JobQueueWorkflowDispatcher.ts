@@ -4,17 +4,12 @@ import { makeWorkflowJobData } from './WorkflowJob';
 import type { JobResultStatus } from './JobQueueEngine';
 import { isResultStatus } from './JobQueueEngine';
 import { Logger, assert } from './utils';
-import { WfArray, NamesOfWfs } from './typeHelpers';
+import { WfArray, NamesOfWfs, MatchingWorkflow } from './typeHelpers';
 import { Config } from './Config';
 
 export type Opts = {
   logger: Logger,
 };
-
-type MatchingWorkflow<Wf, Names extends string, In, Out, No, Co>
-  = Wf extends Workflow<In, Out, infer N, No, Co>
-  ? (Exclude<N, Names> extends never ? Wf : never)
-  : never;
 
 export class JobQueueWorkflowDispatcher<
   const Names extends NamesOfWfs<Wfs>,
@@ -23,8 +18,8 @@ export class JobQueueWorkflowDispatcher<
 > {
   constructor(public readonly config: Config<Names, Wfs, Qs>) {}
 
-  async dispatch<N extends string, Input, Out, No, Co, Meta = unknown>(
-    props: MatchingWorkflow<Workflow<Input, Out, N, No, Co>, Names, Input, Out, No, Co>,
+  async dispatch<N extends string, Input, Output, No, Co, Meta = unknown>(
+    props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
     input: Input,
     opts?: { jobId?: string, meta?: Meta },
   ) {

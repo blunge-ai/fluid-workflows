@@ -19,7 +19,7 @@ export type JobResultStatus<Meta> = {
   type: Exclude<JobResultType, 'success'>,
   jobId: string,
   meta: Meta,
-  reason: string,
+  reason?: string,
 };
 
 export type JobQueuedStatus<Meta> = {

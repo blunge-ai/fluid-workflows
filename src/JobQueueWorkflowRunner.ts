@@ -4,7 +4,6 @@ import type { StepFn } from './Workflow';
 import type { JobData, JobResult, JobStatusType } from './JobQueueEngine';
 import { timeout, assertNever, assert } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
-import type { WorkflowRunner } from './WorkflowRunner';
 import { WfArray, NamesOfWfs, ValueOf } from './typeHelpers';
 import { Config } from './Config';
 
@@ -12,7 +11,7 @@ export class JobQueueWorkflowRunner<
   const Names extends NamesOfWfs<Wfs>,
   const Wfs extends WfArray<Names>,
   const Qs extends Record<NamesOfWfs<Wfs>, string>
-> implements WorkflowRunner<ValueOf<Qs>> {
+>{
   constructor(public readonly config: Config<Names, Wfs, Qs>) {}
 
   async runSteps<Input, Output>(
