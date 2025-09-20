@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper, isCompleteWrapper, withCompleteWrapper } from './Workflow';
 import type { StepFn } from './Workflow';
-import type { JobData, JobResult } from './JobQueueEngine';
+import type { JobData, JobResult, JobStatusType } from './JobQueueEngine';
 import { timeout, assertNever, assert } from './utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
 import type { WorkflowRunner } from './WorkflowRunner';
@@ -21,7 +21,7 @@ export class JobQueueWorkflowRunner<
     queue: string,
     token: string,
     childResults?: Record<string, JobResult<unknown>>,
-  ): Promise<[Output | undefined, 'suspended' | 'success']>{
+  ): Promise<{ status: Extract<JobStatusType, 'suspended' | 'success'>, output?: Output }>{
 
     const runOptions: WorkflowRunOptions<Input, Output, unknown> = {
       progress: async (progressInfo: WorkflowProgressInfo) => {
@@ -65,7 +65,7 @@ export class JobQueueWorkflowRunner<
           continue;
         }
         if (isCompleteWrapper(out)) {
-          return [out.output as Output, 'success'];
+          return { status: 'success', output: out.output as Output };
         }
         result = out;
       } else {
@@ -97,7 +97,7 @@ export class JobQueueWorkflowRunner<
             parentQueue: queue,
           });
           if (!maybeResults) {
-            return [undefined, 'suspended'];
+            return { status: 'suspended' };
           }
           childResults = maybeResults;
         }
@@ -121,26 +121,28 @@ export class JobQueueWorkflowRunner<
         await runOptions.update(result);
       }
     }
-    return [result as Output, 'success'];
+    return { status: 'success', output: result as Output };
   }
 
-  async runJob(job: JobData<WorkflowJobData, unknown>, { childResults, queue, token }: { childResults?: Record<string, JobResult<unknown>>, queue: string, token: string }, ) {
+  async runJob<Input, Output>(job: JobData<WorkflowJobData<Input>, unknown>, { childResults, queue, token }: { childResults?: Record<string, JobResult<unknown>>, queue: string, token: string }): Promise<{ status: Extract<JobStatusType, 'suspended' | 'success' | 'error'>, output?: Output }> {
     const jobId = job.id;
     try {
       const workflow = findWorkflow(this.config.allWorkflows, job.input);
       validateWorkflowSteps(workflow, job.input);
-      const [output, status] = await this.runSteps(workflow, job, queue, token, childResults);
+      const { output, status } = await this.runSteps<Input, Output>(workflow as Workflow<Input, Output>, job, queue, token, childResults);
       if (status === 'suspended') {
-        return;
+        // nothing to do
       } else if (status === 'success') {
         await this.config.engine.completeJob({ queue, token, jobId, result: { type: 'success', output } });
       } else {
         assertNever(status);
       }
+      return { output, status };
     } catch (err) {
       this.config.logger.error({ err, queue }, 'workflow runner: exception occured when running workflow');
       const reason = `exception when running workflow: ${new String(err)}`;
       await this.config.engine.completeJob({ queue, token, jobId, result: { type: 'error', reason } });
+      return { status: 'error' };
     }
   }
 
