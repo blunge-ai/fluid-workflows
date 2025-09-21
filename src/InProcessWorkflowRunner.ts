@@ -42,21 +42,24 @@ export class InProcessWorkflowRunner<
 
   private async updateState<Meta>(jobId: string, state: WorkflowJobData<unknown>, status?: JobStatus<Meta, WorkflowProgressInfo>, opts?: RunOptions<Meta>) {
     // TODO redis multi
-    await this.redis.set(jobId, pack(state));
+    await this.redis.set(`jobs:state:${jobId}`, pack(state));
     if (status) {
-      this.publishStatus(jobId, status, opts)
+      await this.publishStatus(jobId, status, opts)
     }
   }
 
-  private async persistResult<Output>(jobId: string, result: JobResult<Output>) {
+  private async handleResult<Output, Meta>(jobId: string, result: JobResult<Output>, status?: JobStatus<Meta, WorkflowProgressInfo>, opts?: RunOptions<Meta>) {
     await this.redis.set(`jobs:result:${jobId}`, pack(result));
+    if (status) {
+      await this.publishStatus(jobId, status, opts);
+    }
   }
 
   async run<const N extends string, Input, Output, No, Co, Meta = unknown>(
     props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
     input: Input,
     opts?: RunOptions<Meta>,
-  ): Promise<Output> {
+  ) {
     const workflow = findWorkflow(this.allWorkflows, props) as Workflow<Input, Output>;
 
     const jobId = opts?.jobId ?? `${props.name}-${uuidv4()}`;
@@ -110,8 +113,8 @@ export class InProcessWorkflowRunner<
         }
         if (isCompleteWrapper(out)) {
           const output = (out as any).output as Output;
-          await this.persistResult(jobId, { type: 'success', output });
-          await this.publishStatus(jobId, { type: 'success', jobId, meta: opts?.meta as Meta, resultKey: jobId });
+          const status = { type: 'success', jobId, meta: opts?.meta as Meta, resultKey: jobId } as const;
+          await this.handleResult(jobId, { type: 'success', output }, status, opts);
           return output;
         }
         result = out;
@@ -124,14 +127,14 @@ export class InProcessWorkflowRunner<
 
       this.logger.info({ name: props.name, version: props.version, meta: opts?.meta, jobId }, 'finished workflow');
       const output = result as Output;
-      this.persistResult(jobId, { type: 'success', output })
-      await this.publishStatus(jobId, { type: 'success', jobId, meta: opts?.meta as Meta, resultKey: jobId });
+      const status = { type: 'success', jobId, meta: opts?.meta as Meta, resultKey: jobId } as const;
+      this.handleResult(jobId, { type: 'success', output }, status, opts)
       return output;
     } catch (err) {
       const reason = `exception when running workflow: ${String(err)}`;
       this.logger.error({ name: props.name, version: props.version, meta: opts?.meta, jobId, reason, err }, 'workflow error');
-      await this.persistResult(jobId, { type: 'error', reason });
-      await this.publishStatus(jobId, { type: 'error', jobId, meta: opts?.meta as Meta, reason });
+      const status = { type: 'error', jobId, meta: opts?.meta as Meta, reason } as const;
+      await this.handleResult(jobId, { type: 'error', reason }, status, opts);
       throw err;
     }
   }

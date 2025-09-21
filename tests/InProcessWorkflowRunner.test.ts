@@ -24,10 +24,10 @@ test('complete finishes the workflow early', async () => {
       if (a + b === 5) {
         return complete({ sum: 5 });
       }
-      return { sum: a + b } as any;
+      return { sum: a + b };
     })
     .step(async () => {
-      return { sum: 9999 } as any;
+      return { sum: 9999 };
     });
 
   const runner = new InProcessWorkflowRunner({ workflows: [workflow] });
@@ -44,10 +44,10 @@ test('restart restarts from the beginning', async () => {
       if (input.iterations > 0) {
         return restart({ iterations: input.iterations - 1, value: input.value + 1 });
       }
-      return { after: input.value } as any;
+      return { after: input.value };
     })
     .step(async ({ after }) => {
-      return { out: after } as any;
+      return { out: after };
     });
 
   const runner = new InProcessWorkflowRunner({ workflows: [workflow] });
