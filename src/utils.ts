@@ -8,7 +8,7 @@ export type Simplify<T> =
     : T;
 
 export const redisOptions ={
-  family: 6, // IPv6 required for fly.io
+  //family: 6, // IPv6 required for fly.io
   enableOfflineQueue: true,
   maxRetriesPerRequest: null,
   reconnectOnError: () => true,

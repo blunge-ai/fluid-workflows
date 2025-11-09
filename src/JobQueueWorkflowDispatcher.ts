@@ -6,22 +6,31 @@ import { isResultStatus } from './JobQueueEngine';
 import { Logger, assert } from './utils';
 import { WfArray, NamesOfWfs, MatchingWorkflow } from './typeHelpers';
 import { Config } from './Config';
+import type { WorkflowDispatcher, DispatchOptions } from './WorkflowDispatcher';
 
 export type Opts = {
   logger: Logger,
 };
 
+export interface JobQueueWorkflowDispatcherInterface<
+  Names extends NamesOfWfs<Wfs>,
+  Wfs extends WfArray<Names>,
+  Qs extends Record<NamesOfWfs<Wfs>, string>
+> extends WorkflowDispatcher<Names, Wfs> {
+  readonly config: Config<Names, Wfs, Qs>;
+}
+
 export class JobQueueWorkflowDispatcher<
   const Names extends NamesOfWfs<Wfs>,
   const Wfs extends WfArray<Names>,
   const Qs extends Record<NamesOfWfs<Wfs>, string>
-> {
+> implements JobQueueWorkflowDispatcherInterface<Names, Wfs, Qs> {
   constructor(public readonly config: Config<Names, Wfs, Qs>) {}
 
   async dispatch<N extends string, Input, Output, No, Co, Meta = unknown>(
     props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
     input: Input,
-    opts?: { jobId?: string, meta?: Meta },
+    opts?: DispatchOptions<Meta>,
   ) {
     // ensure the correct workflow/version was passed to the constructor
     findWorkflow(this.config.allWorkflows, props);
@@ -39,7 +48,7 @@ export class JobQueueWorkflowDispatcher<
   async dispatchAwaitingOutput<const N extends string, Input, Output, No, Co, Meta = unknown>(
     props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
     input: Input,
-    opts?: { jobId?: string, meta?: Meta },
+    opts?: DispatchOptions<Meta>,
   ) {
     // ensure the correct workflow/version was passed to the constructor
     findWorkflow(this.config.allWorkflows, props);

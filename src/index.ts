@@ -21,12 +21,20 @@ export {
 export {
  JobQueueWorkflowDispatcher
 } from './JobQueueWorkflowDispatcher';
+export type { JobQueueWorkflowDispatcherInterface } from './JobQueueWorkflowDispatcher';
 export { Config } from './Config';
 export { BullMqAdapter } from './BullMqAdapter';
 export { InProcessWorkflowRunner } from './InProcessWorkflowRunner';
 export { InMemoryJobQueueAdapter } from './InMemoryJobQueueAdapter';
 export { HttpJobQueueEngineClient } from './HttpJobQueueEngineClient';
 export { HttpJobQueueEngineServer } from './HttpJobQueueEngineServer';
+export type { WorkflowDispatcher, DispatchOptions } from './WorkflowDispatcher';
+
+export { CloudflareWorkflowDispatcher } from './cloudflare/CloudflareWorkflowDispatcher';
+export type { CloudflareWorkflowDispatcherOptions } from './cloudflare/CloudflareWorkflowDispatcher';
+export { CloudflareWorkflowRunner } from './cloudflare/CloudflareWorkflowRunner';
+export type { CloudflareWorkflowRunnerOptions } from './cloudflare/CloudflareWorkflowRunner';
+export type { InstanceStatus, InstanceDetails } from './cloudflare/CloudflareWorkflowClient';
 
 import { Config } from './Config';
 import { JobQueueWorkflowRunner } from './JobQueueWorkflowRunner';

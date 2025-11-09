@@ -5,7 +5,7 @@ import type { JobStatus } from './JobQueueEngine';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
 import { defaultRedisConnection, defaultLogger } from './utils';
 import type { Logger } from './utils';
-import { pack } from './packer';
+import { pack, unpack } from './packer';
 import { JobResult } from './JobQueueEngine';
 import Redis from 'ioredis';
 
@@ -22,10 +22,12 @@ export class InProcessWorkflowRunner<
   private readonly redis;
   private readonly allWorkflows: Workflow<unknown, unknown>[];
   private readonly logger: Logger;  
+  private readonly lockTimeoutMs: number;
 
   constructor(
     opts: {
-      workflows: Wfs;
+      workflows: Wfs,
+      lockTimeoutMs: number,
       logger?: Logger,
       redisConnection?: () => Redis,
     }
@@ -33,6 +35,7 @@ export class InProcessWorkflowRunner<
     this.redis = (opts.redisConnection ?? defaultRedisConnection)(); 
     this.logger = opts.logger ?? defaultLogger;
     this.allWorkflows = collectWorkflows(opts.workflows as unknown as Workflow<unknown, unknown>[]);
+    this.lockTimeoutMs = opts.lockTimeoutMs;
   }
 
   private async publishStatus<Meta>(jobId: string, status: JobStatus<Meta, WorkflowProgressInfo>, opts?: RunOptions<Meta>) {
@@ -41,8 +44,10 @@ export class InProcessWorkflowRunner<
   }
 
   private async updateState<Meta>(jobId: string, state: WorkflowJobData<unknown>, status?: JobStatus<Meta, WorkflowProgressInfo>, opts?: RunOptions<Meta>) {
-    // TODO redis multi
-    await this.redis.set(`jobs:state:${jobId}`, pack(state));
+    const currentState = await this.redis.setBuffer(`jobs:state:${jobId}`, pack(state), 'PX', this.lockTimeoutMs, 'GET');
+    if (currentState) {
+      
+    }
     if (status) {
       await this.publishStatus(jobId, status, opts)
     }
