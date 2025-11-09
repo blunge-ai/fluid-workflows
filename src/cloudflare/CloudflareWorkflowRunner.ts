@@ -1,89 +1,196 @@
-import type { Workflow } from '../Workflow';
-import type { MatchingWorkflow, NamesOfWfs, WfArray } from '../typeHelpers';
-import { CloudflareWorkflowClient, type CloudflareWorkflowClientOptions, type InstanceDetails } from './CloudflareWorkflowClient';
-import type { DispatchOptions } from '../WorkflowDispatcher';
-import type { Logger } from '../utils';
+import {
+  Workflow,
+  isCompleteWrapper,
+  isRestartWrapper,
+  withCompleteWrapper,
+  withRestartWrapper,
+  type WorkflowRunOptions,
+} from '../Workflow';
+import { defaultLogger, type Logger } from '../utils';
+import { CloudflareWorkflowDispatcher } from './CloudflareWorkflowDispatcher';
 
-export type CloudflareWorkflowRunnerOptions<
-  Names extends NamesOfWfs<Wfs>,
-  Wfs extends WfArray<Names>
-> = CloudflareWorkflowClientOptions<Names, Wfs>;
+type AnyWorkflow = Workflow<any, any, any, any, any>;
 
-export class CloudflareWorkflowRunner<
-  Names extends NamesOfWfs<Wfs>,
-  Wfs extends WfArray<Names>
-> {
-  private readonly client: CloudflareWorkflowClient<Names, Wfs>;
+type AnyDispatcher = CloudflareWorkflowDispatcher<any, any>;
+
+
+export interface CloudflareWorkflowStep {
+  do<T>(name: string, callback: () => Promise<T> | T): Promise<T>;
+  do<T>(name: string, options: unknown, callback: () => Promise<T> | T): Promise<T>;
+}
+
+export type CloudflareWorkflowEvent<Payload> = {
+  payload: Payload;
+  timestamp: Date;
+  instanceId: string;
+};
+
+export type CloudflareWorkflowRunnerOptions = {
+  workflows: AnyWorkflow[];
+  dispatcher: AnyDispatcher;
+  logger?: Logger;
+  stepNamePrefix?: string;
+};
+
+export class CloudflareWorkflowRunner {
   private readonly logger: Logger;
+  private readonly rootPrefix?: string;
+  private readonly dispatcher: AnyDispatcher;
 
-  constructor(opts: CloudflareWorkflowRunnerOptions<Names, Wfs>) {
-    this.client = new CloudflareWorkflowClient(opts);
-    this.logger = this.client.logger;
-  }
-
-  async start<N extends string, Input, Output, No, Co, Meta = unknown>(
-    props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
-    input: Input,
-    opts?: DispatchOptions<Meta>,
-  ): Promise<{ instanceId: string, status: string }> {
-    this.client.ensureWorkflowRegistered({ name: props.name, version: props.version });
-    const workflow = props as Workflow<Input, Output, N, No, Co>;
-    const cfWorkflow = workflow as unknown as Workflow<any, any>;
-    const params = this.client.prepareParams(cfWorkflow, input, opts?.meta);
-    const result = await this.client.createInstance(cfWorkflow, params, { jobId: opts?.jobId });
-    this.logger.info({ workflow: workflow.name, instanceId: result.id, status: result.status }, 'cloudflare: workflow started');
-    return { instanceId: result.id, status: result.status };
-  }
-
-  async run<N extends string, Input, Output, No, Co, Meta = unknown>(
-    props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
-    input: Input,
-    opts?: DispatchOptions<Meta>,
-  ): Promise<{ instanceId: string, output: Output }> {
-    this.client.ensureWorkflowRegistered({ name: props.name, version: props.version });
-    const workflow = props as Workflow<Input, Output, N, No, Co>;
-    const cfWorkflow = workflow as unknown as Workflow<any, any>;
-    const params = this.client.prepareParams(cfWorkflow, input, opts?.meta);
-    const creation = await this.client.createInstance(cfWorkflow, params, { jobId: opts?.jobId });
-    this.logger.info({ workflow: workflow.name, instanceId: creation.id, status: creation.status }, 'cloudflare: workflow started');
-    try {
-      const output = await this.client.waitForCompletion<Output>(cfWorkflow, creation.id);
-      this.logger.info({ workflow: workflow.name, instanceId: creation.id }, 'cloudflare: workflow completed');
-      return { instanceId: creation.id, output };
-    } catch (err) {
-      this.logger.error({ workflow: workflow.name, instanceId: creation.id, err }, 'cloudflare: workflow failed');
-      throw err;
+  constructor(options: CloudflareWorkflowRunnerOptions) {
+    const { workflows, dispatcher, logger, stepNamePrefix } = options;
+    if (!workflows || workflows.length === 0) {
+      throw new Error('CloudflareWorkflowRunner requires at least one workflow');
     }
+    if (!dispatcher) {
+      throw new Error('CloudflareWorkflowRunner requires a CloudflareWorkflowDispatcher instance');
+    }
+    this.logger = logger ?? defaultLogger;
+    this.rootPrefix = stepNamePrefix ? sanitizeSegment(stepNamePrefix) : undefined;
+    this.dispatcher = dispatcher;
   }
 
-  async waitForCompletion<N extends string, Input, Output, No, Co>(
-    props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
-    instanceId: string,
+  async run<Input, Output>(
+    workflow: Workflow<Input, Output, any, any, any>,
+    event: CloudflareWorkflowEvent<Input>,
+    step: CloudflareWorkflowStep,
   ): Promise<Output> {
-    this.client.ensureWorkflowRegistered({ name: props.name, version: props.version });
-    const cfWorkflow = props as unknown as Workflow<any, any>;
-    return await this.client.waitForCompletion<Output>(cfWorkflow, instanceId);
+    const wf = workflow as AnyWorkflow;
+    const prefix = this.workflowPrefix(wf, this.rootPrefix);
+    const parsedInput = this.validateInput(wf, event.payload);
+    const output = await this.executeWorkflow(wf, parsedInput, step, prefix);
+    this.logger.info({ workflow: wf.name, instanceId: event.instanceId }, 'cloudflare: workflow run complete');
+    return output as Output;
   }
 
-  async getInstanceDetails<N extends string, Input, Output, No, Co>(
-    props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
-    instanceId: string,
-  ): Promise<InstanceDetails> {
-    this.client.ensureWorkflowRegistered({ name: props.name, version: props.version });
-    const cfWorkflow = props as unknown as Workflow<any, any>;
-    return await this.client.fetchInstanceDetails(cfWorkflow, instanceId);
+  async runWithInput<Input, Output>(
+    workflow: Workflow<Input, Output, any, any, any>,
+    input: Input,
+    step: CloudflareWorkflowStep,
+  ): Promise<Output> {
+    const wf = workflow as AnyWorkflow;
+    const prefix = this.workflowPrefix(wf, this.rootPrefix);
+    const parsedInput = this.validateInput(wf, input);
+    const output = await this.executeWorkflow(wf, parsedInput, step, prefix);
+    return output as Output;
   }
 
-  async sendEvent<N extends string, Input, Output, No, Co>(
-    props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
-    instanceId: string,
-    eventType: string,
-    payload?: unknown,
-  ): Promise<void> {
-    this.client.ensureWorkflowRegistered({ name: props.name, version: props.version });
-    const cfWorkflow = props as unknown as Workflow<any, any>;
-    await this.client.sendEvent(cfWorkflow, instanceId, eventType, payload);
-    const workflow = props as Workflow<Input, Output, N, No, Co>;
-    this.logger.info({ workflow: workflow.name, instanceId, eventType }, 'cloudflare: event sent');
+  private async executeWorkflow(
+    workflow: AnyWorkflow,
+    initialInput: unknown,
+    stepApi: CloudflareWorkflowStep,
+    prefix: string,
+  ): Promise<unknown> {
+    let current: unknown = initialInput;
+    let index = 0;
+
+    while (index < workflow.steps.length) {
+      const wfStep = workflow.steps[index];
+
+      if (typeof wfStep === 'function') {
+        const stepName = this.stepName(prefix, index + 1);
+        this.logger.info({ workflow: workflow.name, step: stepName }, 'cloudflare: step start');
+        const runOptions = this.runOptions();
+        const result = await stepApi.do(stepName, async () => {
+          return await wfStep(current, runOptions);
+        });
+        if (isRestartWrapper(result)) {
+          current = this.validateInput(workflow, result.input);
+          index = 0;
+          this.logger.info({ workflow: workflow.name, step: stepName }, 'cloudflare: restart requested');
+          continue;
+        }
+        if (isCompleteWrapper(result)) {
+          this.logger.info({ workflow: workflow.name, step: stepName }, 'cloudflare: complete requested');
+          return result.output;
+        }
+        current = result;
+        this.logger.info({ workflow: workflow.name, step: stepName }, 'cloudflare: step complete');
+        index += 1;
+        continue;
+      }
+
+      if (wfStep instanceof Workflow) {
+        const childWorkflow = wfStep as AnyWorkflow;
+        const childPrefix = this.workflowPrefix(childWorkflow, prefix);
+        current = await this.runChildWorkflow({
+          workflow: childWorkflow,
+          input: current,
+          stepApi,
+          prefix: childPrefix,
+        });
+        index += 1;
+        continue;
+      }
+
+      const children = wfStep as Record<string, AnyWorkflow>;
+      if (typeof current !== 'object' || current === null) {
+        throw new Error(`workflow '${workflow.name}' expected object input for childStep`);
+      }
+      const inputRecord = current as Record<string, unknown>;
+      const outputs: Record<string, unknown> = {};
+      for (const [key, childWorkflow] of Object.entries(children)) {
+        const childPrefix = this.workflowPrefix(childWorkflow, prefix, key);
+        outputs[key] = await this.runChildWorkflow({
+          workflow: childWorkflow,
+          input: inputRecord[key],
+          stepApi,
+          prefix: childPrefix,
+        });
+      }
+      current = outputs;
+      index += 1;
+    }
+
+    return current;
   }
+
+  private async runChildWorkflow(args: {
+    workflow: AnyWorkflow;
+    input: unknown;
+    stepApi: CloudflareWorkflowStep;
+    prefix: string;
+  }): Promise<unknown> {
+    const { workflow, input, stepApi, prefix } = args;
+    return await stepApi.do(`${prefix}.dispatch`, async () => {
+      return await this.dispatcher.dispatchAwaitingOutput(workflow as any, input as any);
+    });
+  }
+
+  private runOptions(): WorkflowRunOptions<any, any, any> {
+    return {
+      progress: async () => ({ interrupt: false }),
+      update: async () => ({ interrupt: false }),
+      restart: withRestartWrapper,
+      complete: withCompleteWrapper,
+    };
+  }
+
+  private validateInput(workflow: AnyWorkflow, input: unknown): unknown {
+    if (workflow.inputSchema) {
+      return workflow.inputSchema.parse(input);
+    }
+    return input;
+  }
+
+  private workflowPrefix(workflow: AnyWorkflow, parentPrefix?: string, alias?: string) {
+    const workflowSegment = `${sanitizeSegment(workflow.name)}-v${workflow.version}`;
+    const aliasSegment = alias ? sanitizeSegment(alias) : undefined;
+    const segments = [parentPrefix, workflowSegment, aliasSegment].filter(Boolean) as string[];
+    return segments.join('.');
+  }
+
+  private stepName(prefix: string, stepIndex: number) {
+    const index = stepIndex.toString().padStart(3, '0');
+    return `${prefix}.step.${index}`;
+  }
+}
+
+function sanitizeSegment(value: string): string {
+  const cleaned = value
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+  return cleaned || 'segment';
 }

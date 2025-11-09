@@ -33,7 +33,11 @@ export type { WorkflowDispatcher, DispatchOptions } from './WorkflowDispatcher';
 export { CloudflareWorkflowDispatcher } from './cloudflare/CloudflareWorkflowDispatcher';
 export type { CloudflareWorkflowDispatcherOptions } from './cloudflare/CloudflareWorkflowDispatcher';
 export { CloudflareWorkflowRunner } from './cloudflare/CloudflareWorkflowRunner';
-export type { CloudflareWorkflowRunnerOptions } from './cloudflare/CloudflareWorkflowRunner';
+export type {
+  CloudflareWorkflowRunnerOptions,
+  CloudflareWorkflowEvent,
+  CloudflareWorkflowStep,
+} from './cloudflare/CloudflareWorkflowRunner';
 export type { InstanceStatus, InstanceDetails } from './cloudflare/CloudflareWorkflowClient';
 
 import { Config } from './Config';
