@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { assert } from '~/utils';
-import { JobResultStatus } from '~/JobQueueEngine';
-import { BullMqAdapter } from '~/BullMqAdapter';
+import { JobResultStatus } from '~/jobQueue/JobQueueEngine';
+import { BullMqAdapter } from '~/jobQueue/BullMqAdapter';
 import { v4 as uuidv4 } from 'uuid';
 
 test('submit job', async () => {

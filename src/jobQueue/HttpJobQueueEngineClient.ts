@@ -1,5 +1,5 @@
 import type { JobQueueEngine, JobData, JobResult, JobStatus } from './JobQueueEngine';
-import { pack, unpack } from './packer';
+import { pack, unpack } from '../packer';
  
  function makeError(status: number, body: any) {
    const msg = (body && typeof body === 'object' && 'error' in body) ? String(body.error) : `HTTP ${status}`;

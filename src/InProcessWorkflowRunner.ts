@@ -1,12 +1,12 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { WfArray, NamesOfWfs, MatchingWorkflow } from './typeHelpers';
 import { Workflow, findWorkflow, isRestartWrapper, isCompleteWrapper, withRestartWrapper, withCompleteWrapper, collectWorkflows } from './Workflow';
-import type { JobStatus } from './JobQueueEngine';
+import type { JobStatus } from './jobQueue/JobQueueEngine';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
 import { defaultRedisConnection, defaultLogger } from './utils';
 import type { Logger } from './utils';
 import { pack, unpack } from './packer';
-import { JobResult } from './JobQueueEngine';
+import { JobResult } from './jobQueue/JobQueueEngine';
 import Redis from 'ioredis';
 
 type RunOptions<Meta> = {

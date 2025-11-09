@@ -1,11 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper, isCompleteWrapper, withCompleteWrapper } from './Workflow';
-import type { StepFn } from './Workflow';
+import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper, isCompleteWrapper, withCompleteWrapper } from '../Workflow';
+import type { StepFn } from '../Workflow';
 import type { JobData, JobResult, JobStatusType } from './JobQueueEngine';
-import { timeout, assertNever, assert } from './utils';
-import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
-import { WfArray, NamesOfWfs, ValueOf } from './typeHelpers';
-import { Config } from './Config';
+import { timeout, assertNever, assert } from '../utils';
+import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from '../WorkflowJob';
+import { WfArray, NamesOfWfs, ValueOf } from '../typeHelpers';
+import { Config } from '../Config';
 
 export class JobQueueWorkflowRunner<
   const Names extends NamesOfWfs<Wfs>,

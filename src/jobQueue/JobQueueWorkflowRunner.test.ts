@@ -1,9 +1,9 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
 import { Workflow } from '~/Workflow';
-import { JobQueueWorkflowRunner } from '~/JobQueueWorkflowRunner';
-import { JobQueueWorkflowDispatcher } from '~/JobQueueWorkflowDispatcher';
-import { BullMqAdapter } from '~/BullMqAdapter';
+import { JobQueueWorkflowRunner } from '~/jobQueue/JobQueueWorkflowRunner';
+import { JobQueueWorkflowDispatcher } from '~/jobQueue/JobQueueWorkflowDispatcher';
+import { BullMqAdapter } from '~/jobQueue/BullMqAdapter';
 import { Config } from '~/Config';
 import { v4 as uuidv4 } from 'uuid';
 import { timeout } from '~/utils';

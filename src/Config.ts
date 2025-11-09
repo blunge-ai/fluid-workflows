@@ -1,4 +1,4 @@
-import type { JobQueueEngine } from './JobQueueEngine';
+import type { JobQueueEngine } from './jobQueue/JobQueueEngine';
 import type { Logger } from './utils';
 import { defaultLogger } from './utils';
 import type { WfArray, NamesOfWfs, RequireKeys } from './typeHelpers';

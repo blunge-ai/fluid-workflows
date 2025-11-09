@@ -17,17 +17,17 @@ export {
 } from './Workflow';
 export {
  JobQueueWorkflowRunner
-} from './JobQueueWorkflowRunner';
+} from './jobQueue/JobQueueWorkflowRunner';
 export {
  JobQueueWorkflowDispatcher
-} from './JobQueueWorkflowDispatcher';
-export type { JobQueueWorkflowDispatcherInterface } from './JobQueueWorkflowDispatcher';
+} from './jobQueue/JobQueueWorkflowDispatcher';
+export type { JobQueueWorkflowDispatcherInterface } from './jobQueue/JobQueueWorkflowDispatcher';
 export { Config } from './Config';
-export { BullMqAdapter } from './BullMqAdapter';
+export { BullMqAdapter } from './jobQueue/BullMqAdapter';
 export { InProcessWorkflowRunner } from './InProcessWorkflowRunner';
-export { InMemoryJobQueueAdapter } from './InMemoryJobQueueAdapter';
-export { HttpJobQueueEngineClient } from './HttpJobQueueEngineClient';
-export { HttpJobQueueEngineServer } from './HttpJobQueueEngineServer';
+export { InMemoryJobQueueAdapter } from './jobQueue/InMemoryJobQueueAdapter';
+export { HttpJobQueueEngineClient } from './jobQueue/HttpJobQueueEngineClient';
+export { HttpJobQueueEngineServer } from './jobQueue/HttpJobQueueEngineServer';
 export type { WorkflowDispatcher, DispatchOptions } from './WorkflowDispatcher';
 
 export { CloudflareWorkflowDispatcher } from './cloudflare/CloudflareWorkflowDispatcher';
@@ -37,10 +37,10 @@ export type { CloudflareWorkflowRunnerOptions } from './cloudflare/CloudflareWor
 export type { InstanceStatus, InstanceDetails } from './cloudflare/CloudflareWorkflowClient';
 
 import { Config } from './Config';
-import { JobQueueWorkflowRunner } from './JobQueueWorkflowRunner';
-import { JobQueueWorkflowDispatcher } from './JobQueueWorkflowDispatcher';
+import { JobQueueWorkflowRunner } from './jobQueue/JobQueueWorkflowRunner';
+import { JobQueueWorkflowDispatcher } from './jobQueue/JobQueueWorkflowDispatcher';
 import { Workflow } from './Workflow';
-import type { JobQueueEngine } from './JobQueueEngine';
+import type { JobQueueEngine } from './jobQueue/JobQueueEngine';
 import type { Logger } from './utils';
 import type { WfArray, NamesOfWfs, RequireKeys } from './typeHelpers';
 

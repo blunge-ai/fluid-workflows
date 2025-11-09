@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
-import { InMemoryJobQueueAdapter } from '~/InMemoryJobQueueAdapter';
-import type { JobData } from '~/JobQueueEngine';
+import { InMemoryJobQueueAdapter } from '~/jobQueue/InMemoryJobQueueAdapter';
+import type { JobData } from '~/jobQueue/JobQueueEngine';
 import { assert } from '~/utils';
 
 function setup() {

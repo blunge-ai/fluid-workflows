@@ -2,11 +2,11 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { Worker as BullWorker, Queue as BullQueue } from 'bullmq';
 import Redis from 'ioredis';
-import { pack, unpack } from './packer';
+import { pack, unpack } from '../packer';
 
 import type { JobQueueEngine, JobData, JobStatus, JobResult } from './JobQueueEngine';
 import { isResultStatusType } from './JobQueueEngine';
-import { defaultRedisConnection, timeout, Logger, defaultLogger, assert, mapValues } from './utils';
+import { defaultRedisConnection, timeout, Logger, defaultLogger, assert, mapValues } from '../utils';
 
 export type Opts = {
   attempts: number,

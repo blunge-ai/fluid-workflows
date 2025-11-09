@@ -1,9 +1,9 @@
 import { expect, test } from 'vitest';
 import { createServer } from 'http';
-import type { JobQueueEngine, JobData } from '~/JobQueueEngine';
-import { HttpJobQueueEngineServer } from '~/HttpJobQueueEngineServer';
-import { HttpJobQueueEngineClient } from '~/HttpJobQueueEngineClient';
-import { InMemoryJobQueueAdapter } from '~/InMemoryJobQueueAdapter';
+import type { JobQueueEngine, JobData } from '~/jobQueue/JobQueueEngine';
+import { HttpJobQueueEngineServer } from '~/jobQueue/HttpJobQueueEngineServer';
+import { HttpJobQueueEngineClient } from '~/jobQueue/HttpJobQueueEngineClient';
+import { InMemoryJobQueueAdapter } from '~/jobQueue/InMemoryJobQueueAdapter';
 
 async function withServer(engine: JobQueueEngine, fn: (client: HttpJobQueueEngineClient) => Promise<void>) {
   const handler = new HttpJobQueueEngineServer(engine).handler;

@@ -1,12 +1,12 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, findWorkflow } from './Workflow';
-import { makeWorkflowJobData } from './WorkflowJob';
+import { Workflow, findWorkflow } from '../Workflow';
+import { makeWorkflowJobData } from '../WorkflowJob';
 import type { JobResultStatus } from './JobQueueEngine';
 import { isResultStatus } from './JobQueueEngine';
-import { Logger, assert } from './utils';
-import { WfArray, NamesOfWfs, MatchingWorkflow } from './typeHelpers';
-import { Config } from './Config';
-import type { WorkflowDispatcher, DispatchOptions } from './WorkflowDispatcher';
+import { Logger, assert } from '../utils';
+import { WfArray, NamesOfWfs, MatchingWorkflow } from '../typeHelpers';
+import { Config } from '../Config';
+import type { WorkflowDispatcher, DispatchOptions } from '../WorkflowDispatcher';
 
 export type Opts = {
   logger: Logger,
