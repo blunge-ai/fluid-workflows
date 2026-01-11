@@ -63,7 +63,11 @@ export class JobQueueWorkflowRunner<
           continue;
         }
         if (isCompleteWrapper(out)) {
-          return { status: 'success', output: out.output as Output };
+          let output = out.output as Output;
+          if (workflow.outputSchema) {
+            output = workflow.outputSchema.parse(output) as Output;
+          }
+          return { status: 'success', output };
         }
         // Last step's output is the workflow output (no merge)
         if (currentStep === workflow.stepFns.length - 1) {
@@ -183,7 +187,11 @@ export class JobQueueWorkflowRunner<
         await runOptions.update(result);
       }
     }
-    return { status: 'success', output: result as Output };
+    let output = result as Output;
+    if (workflow.outputSchema) {
+      output = workflow.outputSchema.parse(output) as Output;
+    }
+    return { status: 'success', output };
   }
 
   async runJob<Input, Output>(job: JobData<WorkflowJobData<Input>, unknown>, { childResults, queue, token }: { childResults?: Record<string, JobResult<unknown>>, queue: string, token: string }): Promise<{ status: Extract<JobStatusType, 'suspended' | 'success' | 'error'>, output?: Output }> {

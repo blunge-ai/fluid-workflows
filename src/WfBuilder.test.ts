@@ -201,3 +201,144 @@ test('output schema is preserved through step and parallel', async () => {
   const result = await workflow.run({ x: 3 });
   expect(result.result).toBe(27);
 });
+
+test('input schema validation rejects invalid input', async () => {
+  const inputSchema = z.object({ a: z.number(), b: z.number() });
+
+  const workflow = WfBuilder
+    .create({ name: 'input-validation-fail', version: 1, inputSchema })
+    .step(async ({ a, b }) => ({ sum: a + b }));
+
+  await expect(workflow.run({ a: 'not-a-number', b: 3 } as any)).rejects.toThrow();
+});
+
+test('output schema validation rejects invalid output', async () => {
+  const inputSchema = z.object({ a: z.number() });
+  const outputSchema = z.object({ result: z.number() });
+
+  const workflow = WfBuilder
+    .create({ name: 'output-validation-fail', version: 1, inputSchema, outputSchema })
+    .step(async ({ a }) => ({ result: 'not-a-number' as any }));
+
+  await expect(workflow.run({ a: 5 })).rejects.toThrow();
+});
+
+test('output schema validation passes with valid output', async () => {
+  const inputSchema = z.object({ a: z.number(), b: z.number() });
+  const outputSchema = z.object({ sum: z.number() });
+
+  const workflow = WfBuilder
+    .create({ name: 'output-validation-pass', version: 1, inputSchema, outputSchema })
+    .step(async ({ a, b }) => ({ sum: a + b }));
+
+  const result = await workflow.run({ a: 2, b: 3 });
+  expect(result.sum).toBe(5);
+});
+
+test('output schema validation with complete()', async () => {
+  const inputSchema = z.object({ a: z.number() });
+  const outputSchema = z.object({ result: z.number() });
+
+  const workflowValid = WfBuilder
+    .create({ name: 'complete-output-valid', version: 1, inputSchema, outputSchema })
+    .step(async ({ a }, { complete }) => complete({ result: a * 2 }))
+    .step(async () => ({ result: 9999 }));
+
+  const result = await workflowValid.run({ a: 5 });
+  expect(result.result).toBe(10);
+
+  const workflowInvalid = WfBuilder
+    .create({ name: 'complete-output-invalid', version: 1, inputSchema, outputSchema })
+    .step(async ({ a }, { complete }) => complete({ result: 'bad' as any }))
+    .step(async () => ({ result: 9999 }));
+
+  await expect(workflowInvalid.run({ a: 5 })).rejects.toThrow();
+});
+
+test('schema preserved through .step(workflow)', async () => {
+  const inputSchema = z.object({ x: z.number() });
+  const outputSchema = z.object({ result: z.number() });
+
+  const child = WfBuilder
+    .create({ name: 'schema-child', version: 1 })
+    .step(async ({ x, y }: { x: number, y: number }) => ({ z: x + y }));
+
+  const parent = WfBuilder
+    .create({ name: 'schema-parent-child', version: 1, inputSchema, outputSchema })
+    .step(async ({ x }) => ({ y: x * 2 }))
+    .step(child)
+    .step(async ({ z }) => ({ result: z }));
+
+  expect(parent.inputSchema).toBe(inputSchema);
+  expect(parent.outputSchema).toBe(outputSchema);
+
+  const result = await parent.run({ x: 3 });
+  expect(result.result).toBe(9); // 3 + 6 = 9
+});
+
+test('child workflow with its own schemas', async () => {
+  const childInputSchema = z.object({ s: z.string() });
+  const childOutputSchema = z.object({ childOut: z.string() });
+
+  const child = WfBuilder
+    .create({ name: 'child-with-schema', version: 1, inputSchema: childInputSchema, outputSchema: childOutputSchema })
+    .step(async ({ s }) => ({ childOut: `child(${s})` }));
+
+  const parent = WfBuilder
+    .create({ name: 'parent-child-schema', version: 1 })
+    .step(async ({ input }: { input: string }) => ({ s: input }))
+    .step(child)
+    .step(async ({ childOut }) => ({ result: childOut }));
+
+  const result = await parent.run({ input: 'test' });
+  expect(result.result).toBe('child(test)');
+});
+
+test('child workflow schema validation rejects invalid input', async () => {
+  const childInputSchema = z.object({ s: z.string() });
+
+  const child = WfBuilder
+    .create({ name: 'child-input-fail', version: 1, inputSchema: childInputSchema })
+    .step(async ({ s }) => ({ childOut: s }));
+
+  const parent = WfBuilder
+    .create({ name: 'parent-child-input-fail', version: 1 })
+    .step(async ({ n }: { n: number }) => ({ s: n as any })) // passes number instead of string
+    .step(child);
+
+  await expect(parent.run({ n: 123 })).rejects.toThrow();
+});
+
+test('restart re-validates input against schema', async () => {
+  const inputSchema = z.object({ count: z.number().min(0), value: z.number() });
+  let restartAttempts = 0;
+
+  const workflow = WfBuilder
+    .create({ name: 'restart-revalidate', version: 1, inputSchema })
+    .step(async (input, { restart }) => {
+      restartAttempts++;
+      if (input.count > 0) {
+        return restart({ count: input.count - 1, value: input.value + 1 });
+      }
+      return { result: input.value };
+    });
+
+  const result = await workflow.run({ count: 2, value: 10 });
+  expect(result.result).toBe(12);
+  expect(restartAttempts).toBe(3);
+});
+
+test('restart with invalid input fails schema validation', async () => {
+  const inputSchema = z.object({ count: z.number().min(0), value: z.number() });
+
+  const workflow = WfBuilder
+    .create({ name: 'restart-invalid', version: 1, inputSchema })
+    .step(async (input, { restart }) => {
+      if (input.count > 0) {
+        return restart({ count: -999, value: input.value }); // -999 violates min(0)
+      }
+      return { result: input.value };
+    });
+
+  await expect(workflow.run({ count: 1, value: 10 })).rejects.toThrow();
+});

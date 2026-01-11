@@ -131,3 +131,63 @@ test('restart restarts from the beginning in JobQueueWorkflowRunner', async () =
   await stop();
   expect(result.out).toBe(13);
 });
+
+test('output schema validation', async () => {
+  const { engine, queue } = setup();
+
+  const inputSchema = z.object({ a: z.number() });
+  const outputSchema = z.object({ result: z.number() });
+
+  const workflow = WfBuilder
+    .create({ name: 'output-schema-jq', version: 1, inputSchema, outputSchema })
+    .step(async ({ a }) => ({ result: a * 2 }));
+
+  const config = new Config({ engine, workflows: [workflow], queues: { 'output-schema-jq': queue } });
+  const runner = new JobQueueWorkflowRunner(config);
+  const dispatcher = new JobQueueWorkflowDispatcher(config);
+  const stop = runner.run('all');
+  const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 5 });
+  await timeout(100);
+  await stop();
+  expect(result.result).toBe(10);
+});
+
+test('output schema validation rejects invalid output', async () => {
+  const { engine, queue } = setup();
+
+  const inputSchema = z.object({ a: z.number() });
+  const outputSchema = z.object({ result: z.number() });
+
+  const workflow = WfBuilder
+    .create({ name: 'output-invalid-jq', version: 1, inputSchema, outputSchema })
+    .step(async ({ a }) => ({ result: 'not-a-number' as any }));
+
+  const config = new Config({ engine, workflows: [workflow], queues: { 'output-invalid-jq': queue } });
+  const runner = new JobQueueWorkflowRunner(config);
+  const dispatcher = new JobQueueWorkflowDispatcher(config);
+  const stop = runner.run('all');
+  await expect(dispatcher.dispatchAwaitingOutput(workflow, { a: 5 })).rejects.toThrow();
+  await timeout(100);
+  await stop();
+});
+
+test('output schema validation with complete()', async () => {
+  const { engine, queue } = setup();
+
+  const inputSchema = z.object({ a: z.number() });
+  const outputSchema = z.object({ result: z.number() });
+
+  const workflow = WfBuilder
+    .create({ name: 'complete-schema-jq', version: 1, inputSchema, outputSchema })
+    .step(async ({ a }, { complete }) => complete({ result: a * 2 }))
+    .step(async () => ({ result: 9999 }));
+
+  const config = new Config({ engine, workflows: [workflow], queues: { 'complete-schema-jq': queue } });
+  const runner = new JobQueueWorkflowRunner(config);
+  const dispatcher = new JobQueueWorkflowDispatcher(config);
+  const stop = runner.run('all');
+  const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 5 });
+  await timeout(100);
+  await stop();
+  expect(result.result).toBe(10);
+});

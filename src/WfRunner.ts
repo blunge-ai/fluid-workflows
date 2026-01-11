@@ -116,7 +116,10 @@ export class WfRunner<
             continue;
           }
           if (isCompleteWrapper(out)) {
-            const output = (out as any).output as Output;
+            let output = (out as any).output as Output;
+            if (workflow.outputSchema) {
+              output = workflow.outputSchema.parse(output) as Output;
+            }
             const status = { type: 'success', jobId, meta: opts?.meta as Meta, resultKey: jobId } as const;
             await this.storage.setResult(jobId, { type: 'success', output } as JobResult<Output>, status);
             return output;
@@ -181,7 +184,10 @@ export class WfRunner<
       }
 
       this.logger.info({ name: workflow.name, version: workflow.version, meta: opts?.meta, jobId }, 'finished workflow');
-      const output = result as Output;
+      let output = result as Output;
+      if (workflow.outputSchema) {
+        output = workflow.outputSchema.parse(output) as Output;
+      }
       const status = { type: 'success', jobId, meta: opts?.meta as Meta, resultKey: jobId } as const;
       await this.storage.setResult(jobId, { type: 'success', output } as JobResult<Output>, status);
       return output;
