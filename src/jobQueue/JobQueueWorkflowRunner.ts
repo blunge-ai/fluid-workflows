@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper, isCompleteWrapper, withCompleteWrapper } from '../Workflow';
+import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper, isCompleteWrapper, withCompleteWrapper, isStepsChildren } from '../Workflow';
 import type { StepFn } from '../Workflow';
 import type { JobData, JobResult, JobStatusType } from './JobQueueEngine';
 import { timeout, assertNever, assert } from '../utils';
@@ -44,12 +44,12 @@ export class JobQueueWorkflowRunner<
     let currentStep = job.input.currentStep;
     let result: unknown = job.input.input;
 
-    while (currentStep < workflow.steps.length) {
+    while (currentStep < workflow.stepFns.length) {
       if (currentStep === 0 && workflow.inputSchema) {
         result = workflow.inputSchema.parse(result);
       }
 
-      const step = workflow.steps[currentStep];
+      const step = workflow.stepFns[currentStep];
       if (typeof step === 'function' && !(step instanceof Workflow)) {
         // handle step function
         if (childResults) {
@@ -66,14 +66,16 @@ export class JobQueueWorkflowRunner<
         if (isCompleteWrapper(out)) {
           return { status: 'success', output: out.output as Output };
         }
-        result = out;
-      } else {
-        // handle child or childMap steps
-        const entries = (
-          step instanceof Workflow
-            ? [['', step]] as unknown as [string, Workflow<unknown, unknown>][]
-            : Object.entries(step as unknown as Record<string, Workflow<unknown, unknown>>)
-        );
+        // Last step's output is the workflow output (no merge)
+        if (currentStep === workflow.stepFns.length - 1) {
+          result = out;
+        } else {
+          // Merge step output with accumulated state
+          result = { ...(result as Record<string, unknown>), ...(out as Record<string, unknown>) };
+        }
+      } else if (isStepsChildren(step)) {
+        // handle .steps() - pass full accumulated input to each child, merge outputs
+        const entries = Object.entries(step.children as Record<string, Workflow<unknown, unknown>>);
         const childrenPayload = entries.map(([key, childWorkflow]) => {
           const childQueue = this.config.queueFor(childWorkflow.name as any);
           return {
@@ -81,7 +83,7 @@ export class JobQueueWorkflowRunner<
               id: `${job.id}:step:${currentStep}:child:${key}`,
               input: makeWorkflowJobData({
                 props: childWorkflow,
-                input: key === '' ? result : (result as Record<string, unknown>)[key]
+                input: result  // pass full accumulated input
               }),
               meta: undefined,
             },
@@ -100,7 +102,7 @@ export class JobQueueWorkflowRunner<
           }
           childResults = maybeResults;
         }
-        // unwrap results
+        // unwrap results and merge with existing result
         const outputs = Object.fromEntries(entries.map(([key]) => {
           assert(childResults);
           const childResult = childResults[`${job.id}:step:${currentStep}:child:${key}`];
@@ -110,13 +112,55 @@ export class JobQueueWorkflowRunner<
           }
           return [key, childResult.output];
         }));
-        childResults = undefined; // only valid for the first iteration
-        result = step instanceof Workflow ? outputs[''] : outputs;
+        childResults = undefined;
+        result = { ...(result as Record<string, unknown>), ...outputs };
+      } else {
+        // handle .step(workflow) - single child workflow
+        const childWorkflow = step as unknown as Workflow<unknown, unknown>;
+        const childQueue = this.config.queueFor(childWorkflow.name as any);
+        const childId = `${job.id}:step:${currentStep}:child:`;
+        if (!childResults) {
+          const maybeResults = await this.config.engine.submitChildrenSuspendParent<unknown>({
+            token,
+            children: [{
+              data: {
+                id: childId,
+                input: makeWorkflowJobData({
+                  props: childWorkflow,
+                  input: result
+                }),
+                meta: undefined,
+              },
+              queue: childQueue
+            }],
+            parentId: job.id,
+            parentQueue: queue,
+          });
+          if (!maybeResults) {
+            return { status: 'suspended' };
+          }
+          childResults = maybeResults;
+        }
+        // unwrap result
+        assert(childResults);
+        const childResult = childResults[childId];
+        assert(childResult);
+        if (childResult.type !== 'success') {
+          throw Error('error running child job');
+        }
+        childResults = undefined;
+        // Last step's output is the workflow output (no merge)
+        if (currentStep === workflow.stepFns.length - 1) {
+          result = childResult.output;
+        } else {
+          // Merge child output with accumulated state
+          result = { ...(result as Record<string, unknown>), ...(childResult.output as Record<string, unknown>) };
+        }
       }
 
       currentStep += 1;
       // the result of the last step will be used to complete the job and doesn't need to be persisted
-      if (currentStep !== workflow.steps.length) {
+      if (currentStep !== workflow.stepFns.length) {
         await runOptions.update(result);
       }
     }

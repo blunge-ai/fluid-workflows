@@ -36,6 +36,23 @@ type OutputsOfChildren<Cm>
 type ChildrenNames<Cm>
   = Cm[keyof Cm] extends Workflow<any, any, infer N, any, any> ? N : never;
 
+// For .steps() - children that receive the full accumulated input
+export type StepsChildrenMap<Input, Cn extends string>
+  = { [K in string]: Workflow<Input, any, Cn, any, any> };
+
+type StepsOutputsOfChildren<Cm>
+  = { [K in keyof Cm]: Cm[K] extends Workflow<any, infer O, string, any, any> ? O : never };
+
+// Wrapper class to distinguish .steps() from .childStep() at runtime
+export class StepsChildren<Cm extends Record<string, Workflow<any, any, string, any, any>>> {
+  public __type = 'StepsChildren' as const;
+  constructor(public children: Cm) {}
+}
+
+export function isStepsChildren(value: unknown): value is StepsChildren<any> {
+  return value instanceof StepsChildren;
+}
+
 // Sentinel type for type-dispatching the first .step() which gives a Workflow its input
 declare const __WF_UNSET__: unique symbol;
 type Unset = typeof __WF_UNSET__;
@@ -90,17 +107,18 @@ export class Workflow<Input = Unset, Output = never, const Names extends string 
 
   constructor(
     props: Pick<WorkflowProps, 'name' | 'version'>,
-    public steps: Array<
+    public stepFns: Array<
       StepFn<unknown, unknown, unknown, unknown> |
       Workflow<unknown, unknown, string, any, any> |
-      Record<string, Workflow<unknown, unknown, string, any, any>>
+      Record<string, Workflow<unknown, unknown, string, any, any>> |
+      StepsChildren<any>
     >,
     inputSchema?: ZodTypeAny,
   ) {
     this.name = props.name;
     this.version = props.version;
 
-    this.numSteps = steps.length;
+    this.numSteps = stepFns.length;
     this.inputSchema = inputSchema;
   }
 
@@ -111,43 +129,60 @@ export class Workflow<Input = Unset, Output = never, const Names extends string 
     return new Workflow<unknown, unknown, Name>({ name, version }, [], props.inputSchema) as unknown as Workflow<Unset | z.input<S>, Unset, Name>;
   }
 
+  // .step(workflow) - first step with child workflow
+  step<
+    ChildInput,
+    ChildOutput,
+    const Cn extends string,
+    ChildNext,
+    ChildCtrl,
+  >(
+    this: Workflow<Unset, Output, Names, NextOutput, CtrlOutput>,
+    child: Workflow<ChildInput, ChildOutput, Cn, ChildNext, ChildCtrl>
+  ): Workflow<ChildInput, MkOutput<CtrlOutput, ChildOutput>, Names | Cn, ChildInput & ChildOutput, CtrlOutput>;
+  // .step(workflow) - subsequent step with child workflow, receives accumulated state, output is merged
+  step<
+    ChildInput,
+    ChildOutput,
+    const Cn extends string,
+    ChildNext,
+    ChildCtrl,
+  >(
+    this: Workflow<Input, Output, Names, NextOutput, CtrlOutput>,
+    child: Workflow<ChildInput, ChildOutput, Cn, ChildNext, ChildCtrl>
+  ): Workflow<Input, MkOutput<CtrlOutput, NextOutput & ChildOutput>, Names | Cn, NextOutput & ChildOutput, CtrlOutput>;
+  // .step(fn) - first step, infers workflow input from function parameter
   step<StepInput, StepOutput, SwfOutput>(
     this: Workflow<Unset, Output, Names, NextOutput, CtrlOutput>,
     stepFn: StepFn<StepInput, StepOutput, StepInput, SwfOutput>
-  ): Workflow<StepInput, MkOutput<CtrlOutput, StepOutput>, Names, StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
+  ): Workflow<StepInput, MkOutput<CtrlOutput, StepOutput>, Names, StepInput & StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
+  // .step(fn) - subsequent step with function
   step<StepOutput, WfOutput, SwfOutput>(
     this: Workflow<Input, never, Names, never, never>,
     stepFn: StepFn<Input, StepOutput, Input, SwfOutput>
-  ): Workflow<Input, MkOutput<CtrlOutput, StepOutput>, Names, StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
-  step<StepInput, StepOutput, SwfOutput>(
-    this: Workflow<Input, Output, Names, StepInput, CtrlOutput>,
-    stepFn: StepFn<StepInput, StepOutput, Input, SwfOutput>
-  ): Workflow<Input, MkOutput<CtrlOutput, StepOutput>, Names, StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
+  ): Workflow<Input, MkOutput<CtrlOutput, StepOutput>, Names, Input & StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
+  step<StepOutput, SwfOutput>(
+    this: Workflow<Input, Output, Names, NextOutput, CtrlOutput>,
+    stepFn: StepFn<NextOutput, StepOutput, Input, SwfOutput>
+  ): Workflow<Input, MkOutput<CtrlOutput, StepOutput>, Names, NextOutput & StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
   step(
-    stepFn: StepFn<any, any, any, any>
+    stepFnOrChild: StepFn<any, any, any, any> | Workflow<any, any, string, any, any>
   ): Workflow<any, any, string, any, any> {
     return new Workflow(
       { name: this.name, version: this.version },
-      [ ...this.steps, stepFn ],
+      [ ...this.stepFns, stepFnOrChild ],
       this.inputSchema,
     );
   }
 
-  // TODO dispatch on Workflow<Unset, Unset> like step() to allow a childStep to be the first step in a workflow
-  // childStep(child1)
-  childStep<
-    ChildOutput,
+  // .parallel() - invoke children with the full accumulated input, map outputs to keys
+  parallel<
+    const Cm extends StepsChildrenMap<Input & NextOutput, Cn>,
     const Cn extends string,
-  >(child: Workflow<NextOutput, ChildOutput, Cn, any, any>): Workflow<Input, MkOutput<CtrlOutput, ChildOutput>, Names | Cn, ChildOutput, CtrlOutput>;
-  // childStep({ child1, child2 })
-  childStep<
-    const Cm extends ChildrenMap<NextOutput, Cn>,
-    const Cn extends string,
-  >(childrenMap: ExactChildren<NextOutput, Cn, Cm>): Workflow<Input, MkOutput<CtrlOutput, OutputsOfChildren<Cm>>, Names | ChildrenNames<Cm>, OutputsOfChildren<Cm>, CtrlOutput>;
-  childStep(childOrChildrenMap: Workflow<any, any, string, any, any> | Record<string, Workflow<any, any, string, any, any>>): Workflow<any, any, string, any, any> {
+  >(childrenMap: Cm): Workflow<Input, MkOutput<CtrlOutput, Input & NextOutput & StepsOutputsOfChildren<Cm>>, Names | ChildrenNames<Cm>, Input & NextOutput & StepsOutputsOfChildren<Cm>, CtrlOutput> {
     return new Workflow(
       { name: this.name, version: this.version },
-      [ ...this.steps, childOrChildrenMap  ],
+      [ ...this.stepFns, new StepsChildren(childrenMap) ],
       this.inputSchema,
     );
   }
@@ -177,10 +212,17 @@ export async function runQueueless<Input, Output, Names extends string, NextOutp
     complete: withCompleteWrapper,
   };
 
-  while (stepIndex < workflow.steps.length) {
-    const step = workflow.steps[stepIndex];
+  while (stepIndex < workflow.stepFns.length) {
+    const step = workflow.stepFns[stepIndex];
     if (step instanceof Workflow) {
-      result = await runQueueless(step as unknown as Workflow<unknown, unknown, any, any, any>, result);
+      const childResult = await runQueueless(step as unknown as Workflow<unknown, unknown, any, any, any>, result);
+      // Last step's output is the workflow output (no merge)
+      if (stepIndex === workflow.stepFns.length - 1) {
+        result = childResult;
+      } else {
+        // Merge child output with accumulated state
+        result = { ...(result as Record<string, unknown>), ...(childResult as Record<string, unknown>) };
+      }
     } else if (typeof step === 'function') {
       const stepFn = step as StepFn<unknown, unknown, Input, Output>;
       const stepResult = await stepFn(result, runOptions);
@@ -195,13 +237,19 @@ export async function runQueueless<Input, Output, Names extends string, NextOutp
       if (isCompleteWrapper(stepResult)) {
         return stepResult.output as Output;
       }
-      result = stepResult as unknown;
-    } else {
-      const children = step as unknown as Record<string, Workflow<unknown, unknown, any, any, any>>;
-      const inputRecord = result as Record<string, unknown>;
-      const entries = Object.entries(children);
-      const outputs = await Promise.all(entries.map(([key, child]) => runQueueless(child as any, inputRecord[key] as any)));
-      result = Object.fromEntries(entries.map(([key], i) => [key, outputs[i]]));
+      // Last step's output is the workflow output (no merge)
+      if (stepIndex === workflow.stepFns.length - 1) {
+        result = stepResult;
+      } else {
+        // Merge step output with accumulated state
+        result = { ...(result as Record<string, unknown>), ...(stepResult as Record<string, unknown>) };
+      }
+    } else if (isStepsChildren(step)) {
+      // .parallel() - pass full accumulated input to each child, merge outputs into result
+      const entries = Object.entries(step.children);
+      const outputs = await Promise.all(entries.map(([_key, child]) => runQueueless(child as any, result)));
+      const outputRecord = Object.fromEntries(entries.map(([key], i) => [key, outputs[i]]));
+      result = { ...(result as Record<string, unknown>), ...outputRecord };
     }
 
     stepIndex += 1;
@@ -222,8 +270,8 @@ export function validateWorkflowSteps(workflow: Workflow<unknown, unknown>, { to
   if (currentStep >= totalSteps) {
     throw Error(`inconsistent jobData: current step is ${currentStep} but expected value smaller than ${totalSteps}`);
   }
-  if (workflow.steps.length !== totalSteps) {
-    throw Error(`job totalSteps mismatch: expected ${workflow.steps.length}, received ${totalSteps}`);
+  if (workflow.stepFns.length !== totalSteps) {
+    throw Error(`job totalSteps mismatch: expected ${workflow.stepFns.length}, received ${totalSteps}`);
   }
 }
 
@@ -242,13 +290,13 @@ export function collectWorkflows(workflows: Workflow<unknown, unknown>[]): Workf
     };
     seen.add(key);
     result.push(wf);
-    for (const step of wf.steps) {
+    for (const step of wf.stepFns) {
       if (step instanceof Workflow) {
         visit(step as unknown as Workflow<unknown, unknown>);
       } else if (typeof step === 'function') {
         continue;
-      } else {
-        for (const child of Object.values(step)) {
+      } else if (isStepsChildren(step)) {
+        for (const child of Object.values(step.children)) {
           visit(child as unknown as Workflow<unknown, unknown>);
         }
       }

@@ -48,7 +48,7 @@ const child = fwf.workflow({ name: 'child', version: 1 })
 
 const parent = fwf.workflow({ name: 'parent', version: 1 })
   .step(async ({ n }: { n: number }) => ({ s: `n=${n}` }))
-  .childStep(child)
+  .step(child)
   .step(async ({ s2 }) => ({ out: s2 }));
 
 // Configuration
@@ -80,30 +80,22 @@ await stopChild();
 
 ### Parallel execution
 
-You can pass a map of `{[key]: Workflow}` to `childStep()` to run multiple children in parallel. The
-keys can be arbitrary but must match the output map of the previous step and the child results will be
-mapped to the same keys as the input to the next step.
+Use `.parallel()` to run multiple child workflows in parallel. Each child receives the full 
+accumulated state, and their outputs are merged into the result with the specified keys.
 
 ```ts
-const child1 = fwf.workflow({ name: 'child2', version: 1 })
-  .step(async (input: string) => 'child1-output');
+const child1 = fwf.workflow({ name: 'child1', version: 1 })
+  .step(async ({ n }: { n: number }) => `child1(${n})`);
 
 const child2 = fwf.workflow({ name: 'child2', version: 1 })
-  .step(async (input: string) => 'child2-output');
+  .step(async ({ n }: { n: number }) => `child2(${n})`);
 
 const parent = fwf.workflow({ name: 'parent', version: 1 })
-  .step(async ({ n }: { n: number }) => ({ 
-    child1: 'child1-input',
-    child2: 'child2-input',
-  }))
-  .childStep({ 
-    child1, 
-    child2
-  })
-  .step(async ({
-    child1 // 'child1-output'
-    child2 // 'child2 output'
-  }) => { ... });
+  .step(async ({ n }: { n: number }) => ({ n2: n * 2 }))
+  .parallel({ c1: child1, c2: child2 })
+  .step(async ({ n, n2, c1, c2 }) => ({ 
+    out: `${c1}, ${c2}` // 'child1(5), child2(5)'
+  }));
 ```
 
 ### Zod schema support

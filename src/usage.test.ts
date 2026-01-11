@@ -16,7 +16,7 @@ test('job queues example', async () => {
 
   const parent = fwf.workflow({ name: 'parent', version: 1 })
     .step(async ({ n }: { n: number }) => ({ s: `n=${n}` }))
-    .childStep(child)
+    .step(child)
     .step(async ({ s2 }) => ({ out: s2 }));
 
   const { runner, dispatcher } = fwf.config({

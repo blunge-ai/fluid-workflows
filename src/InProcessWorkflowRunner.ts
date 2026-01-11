@@ -101,8 +101,8 @@ export class InProcessWorkflowRunner<
     };
 
     try {
-      while (currentStep < workflow.steps.length) {
-        const step = workflow.steps[currentStep];
+      while (currentStep < workflow.stepFns.length) {
+        const step = workflow.stepFns[currentStep];
         if (typeof step !== 'function') {
           throw Error('child workflows not yet implemented');
         }
@@ -122,10 +122,16 @@ export class InProcessWorkflowRunner<
           await this.handleResult(jobId, { type: 'success', output }, status, opts);
           return output;
         }
-        result = out;
+        // Last step's output is the workflow output (no merge)
+        if (currentStep === workflow.stepFns.length - 1) {
+          result = out;
+        } else {
+          // Merge step output with accumulated state
+          result = { ...(result as Record<string, unknown>), ...(out as Record<string, unknown>) };
+        }
 
         currentStep += 1;
-        if (currentStep !== workflow.steps.length) {
+        if (currentStep !== workflow.stepFns.length) {
           await this.updateState(jobId, { ...jobData, input: result, currentStep }, undefined, opts);
         }
       }

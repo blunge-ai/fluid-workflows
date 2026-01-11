@@ -28,7 +28,7 @@ test('run child workflow', async () => {
     .step(async ({ inputString }: { inputString: string }) => {
       return { childInput: `input(${inputString})` };
     })
-    .childStep(child)
+    .step(child)
     .step(async ({ childOutput }) => {
       return { output: `output(${childOutput})` };
     });
@@ -88,4 +88,41 @@ test('restart restarts from the beginning in runQueueless', async () => {
 
   const result = await runQueueless(workflow, { iterations: 3, value: 10 });
   expect(result.out).toBe(13);
+});
+
+test('.parallel() runs children with full accumulated input', async () => {
+  const child3 = Workflow
+    .create({ name: 'child3', version: 1 })
+    .step(async ({ s, s2 }: { s: string, s2: string }) => `child3(${s}, ${s2})`);
+
+  const child4 = Workflow
+    .create({ name: 'child4', version: 1 })
+    .step(async ({ s, s2 }: { s: string, s2: string }) => `child4(${s}, ${s2})`);
+
+  const parent = Workflow
+    .create({ name: 'parent-steps', version: 1 })
+    .step(async ({ s }: { s: string }) => ({ s2: `step1(${s})` }))
+    .parallel({ s3: child3, s4: child4 })
+    .step(async ({ s, s2, s3, s4 }) => ({
+      out: `final(${s}, ${s2}, ${s3}, ${s4})`
+    }));
+
+  const result = await runQueueless(parent, { s: 'input' });
+  expect(result.out).toBe('final(input, step1(input), child3(input, step1(input)), child4(input, step1(input)))');
+});
+
+test('.step(workflow) as first step', async () => {
+  const child = Workflow
+    .create({ name: 'first-child', version: 1 })
+    .step(async ({ x }: { x: number }) => ({ y: x * 2 }));
+
+  const parent = Workflow
+    .create({ name: 'parent-first-child', version: 1 })
+    .step(child)
+    .step(async ({ x, y }) => ({
+      result: x + y
+    }));
+
+  const result = await runQueueless(parent, { x: 5 });
+  expect(result.result).toBe(15); // 5 + 10
 });

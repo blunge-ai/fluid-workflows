@@ -23,7 +23,7 @@ test('run step', async () => {
 
   const workflow = Workflow
     .create({ name: 'add-a-and-b', version: 1 })
-    .step(async ({ a, b }) => {
+    .step(async ({ a, b }: { a: number, b: number }) => {
       return { c: a + b };
     });
 
@@ -31,7 +31,7 @@ test('run step', async () => {
   const runner = new JobQueueWorkflowRunner(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
   const stop = runner.run('all');
-  const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 12, b: 34 });
+  const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 12, b: 34 } as { a: number, b: number });
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();
   expect(result.c).toBe(46);
@@ -42,7 +42,7 @@ test('run child workflow', async () => {
 
   const child = Workflow
     .create({ name: 'child-workflow', version: 1 })
-    .step(async ({ childInput }) => {
+    .step(async ({ childInput }: { childInput: string }) => {
       return { childOutput: `child(${childInput})` };
     });
 
@@ -51,7 +51,7 @@ test('run child workflow', async () => {
     .step(async ({ parentInput }: { parentInput: string }) => {
       return { childInput: `input(${parentInput})` };
     })
-    .childStep(child)
+    .step(child)
     .step(async ({ childOutput }) => {
       return { output: `output(${childOutput})` };
     });
@@ -68,34 +68,30 @@ test('run child workflow', async () => {
   expect(result.output).toBe('output(child(input(XX)))');
 });
 
-test('run two named children', async () => {
+test('run parallel children', async () => {
   const { engine } = setup();
 
   const child1 = Workflow
     .create({ name: 'child1', version: 1 })
-    .step(async ({ a }) => {
-      return { a2: a * 2 };
+    .step(async ({ n, n2 }: { n: number, n2: number }) => {
+      return { a2: (n + 1) * 2 };
     });
 
   const child2 = Workflow
     .create({ name: 'child2', version: 1 })
-    .step(async ({ s }) => {
-      return { s2: `child2(${s})` };
+    .step(async ({ n, n2 }: { n: number, n2: number }) => {
+      return { s2: `child2(n=${n})` };
     });
 
   const parent = Workflow
     .create({ name: 'parent-two-children', version: 1 })
-    .step(async ({ n }) => {
-      return { one: { a: n + 1 }, two: { s: `n=${n}` } };
+    .step(async ({ n }: { n: number }) => {
+      return { n2: n };
     })
-    .childStep({ one: child1, two: child2 })
+    .parallel({ one: child1, two: child2 })
     .step(async ({ one, two }) => {
       return { out: `${one.a2}-${two.s2}` };
     });
-
-  const q = Workflow
-    .create({ name: 'q', version: 1 })
-    .step(async ({ n }) => ({ out: n }));
 
   const queues = { 'parent-two-children': 'queue-a', child1: 'queue-b', child2: 'queue-c' } as const;
   const config = new Config({ engine, workflows: [parent], queues });
