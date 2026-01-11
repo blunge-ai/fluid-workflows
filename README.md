@@ -137,35 +137,28 @@ const out = await wf.run({ iterations: 0 });
 console.log(out.iterations); // 10
 ```
 
-### progress and update
-
-__this is work in progress__
-
-The `progress` function allows progress to be reported. Progress events can be subscribed to through
-the `engine`. If the `progress` function returns a true value for `cancelled`, the step should return
-or throw an `Error`. Cancelling a workflow that is in progress is informational only, and the
-workflow can run to successful completion even after it has been cancelled.
+### update
 
 The `update` function allows the step's input data to be updated, such that if the step does not run
 to completion, it will be retried with the updated input data. Progress can also be reported through
-the update function by passing an optional second argument.
+the update function by passing `progress` in the options object.
 
 ```ts
 const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
-  .step(async ({ iterations, maxIterations }, { progress, update }) => ({
+  .step(async ({ iterations, maxIterations }, { update }) => ({
      for (; iterations > 0; iterations--) {
 
        // by convention we pass a value from 0 to 1 to report the current progress
        const progress = Math.min(1, iterations / maxIterations);
 
-       // calling update here updates the input data; the optional second argument reports the current progress
-       const { cancelled } = await update({ iterations }, { progress });
+       // calling update here updates the input data and reports the current progress
+       const { interrupt } = await update({ input: { iterations }, progress: { phase: 'iterating', progress } });
 
        // or just report progress, without updating the step's input data
-       // const { cancelled } = await progress({ progress });
+       // const { interrupt } = await update({ progress: { phase: 'iterating', progress } });
 
-       if (cancelled) {
-         throw Error('cancelled');
+       if (interrupt) {
+         throw Error('interrupted');
        }
      }
   }));

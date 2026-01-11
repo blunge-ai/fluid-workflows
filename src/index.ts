@@ -5,7 +5,6 @@ export type {
  Workflow,
  WorkflowProps,
  WorkflowRunOptions,
- ProgressFn,
  StepFn,
 } from './WfBuilder';
 

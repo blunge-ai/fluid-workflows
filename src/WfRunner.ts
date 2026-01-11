@@ -116,19 +116,15 @@ export class WfRunner<
     }
 
     const runOptions = {
-      progress: async (progressInfo: WfProgressInfo) => {
-        const status = { type: 'active', jobId, meta: opts?.meta as Meta, info: progressInfo } as const;
-        await this.storage.updateState(jobId, { status, ttlMs: this.lockTimeoutMs });
-        return { interrupt: false } as const;
-      },
-      update: async (stepInput: unknown, progressInfo?: WfProgressInfo) => {
+      update: async (updateOpts: { input?: unknown, progress?: WfProgressInfo }) => {
         const status = (
-          progressInfo
-            ? { type: 'active', jobId, meta: opts?.meta as Meta, info: progressInfo } as const
+          updateOpts.progress
+            ? { type: 'active', jobId, meta: opts?.meta as Meta, info: updateOpts.progress } as const
             : undefined
         );
+        const hasInput = 'input' in updateOpts;
         await this.storage.updateState(jobId, {
-          state: { ...jobData, input: stepInput, currentStep },
+          state: hasInput ? { ...jobData, input: updateOpts.input, currentStep } : undefined,
           status,
           ttlMs: this.lockTimeoutMs,
         });

@@ -41,16 +41,13 @@ export type WorkflowProps<Name extends string = string> = {
 };
 
 export type WorkflowRunOptions<WfInput, WfOutput, StepInput> = {
-  progress: ProgressFn,
   update: UpdateFn<StepInput>,
   restart: RestartFn<WfInput>,
   complete: CompleteFn<WfOutput>,
 };
 
-export type ProgressFn
-  = (progressInfo: WfProgressInfo) => Promise<{ interrupt: boolean }>;
 export type UpdateFn<StepInput>
-  = (stepInput: StepInput, progressInfo?: WfProgressInfo) => Promise<{ interrupt: boolean }>;
+  = (opts: { input?: StepInput, progress?: WfProgressInfo }) => Promise<{ interrupt: boolean }>;
 export type StepFn<Input, Output, WfInput, WfOutput>
   = (input: Input, runOpts: WorkflowRunOptions<WfInput, WfOutput, Input>) => Promise<Output>;
 
