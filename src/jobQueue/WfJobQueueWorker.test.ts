@@ -191,3 +191,47 @@ test('output schema validation with complete()', async () => {
   await stop();
   expect(result.result).toBe(10);
 });
+
+test('parallel dispatches all workflows before rethrowing error', async () => {
+  const { engine } = setup();
+  const dispatchedWorkflows: string[] = [];
+
+  const child1 = WfBuilder
+    .create({ name: 'parallel-err-child1', version: 1 })
+    .step(async ({ n }: { n: number }) => {
+      dispatchedWorkflows.push('child1');
+      await timeout(50);
+      throw new Error('child1 failed');
+    });
+
+  const child2 = WfBuilder
+    .create({ name: 'parallel-err-child2', version: 1 })
+    .step(async ({ n }: { n: number }) => {
+      dispatchedWorkflows.push('child2');
+      await timeout(100);
+      return { result: n * 2 };
+    });
+
+  const parent = WfBuilder
+    .create({ name: 'parallel-err-parent', version: 1 })
+    .step(async ({ n }: { n: number }) => ({ n }))
+    .parallel({ one: child1, two: child2 });
+
+  const queues = { 
+    'parallel-err-parent': 'queue-err-a', 
+    'parallel-err-child1': 'queue-err-b', 
+    'parallel-err-child2': 'queue-err-c',
+  } as const;
+  const config = new Config({ engine, workflows: [parent], queues });
+  const worker = new WfJobQueueWorker(config);
+  const dispatcher = new JobQueueWorkflowDispatcher(config);
+  const stop = worker.run(['queue-err-a', 'queue-err-b', 'queue-err-c']);
+  
+  await expect(dispatcher.dispatchAwaitingOutput(parent, { n: 5 })).rejects.toThrow();
+  await timeout(150);
+  await stop();
+
+  // Both workflows should have been dispatched even though child1 failed
+  expect(dispatchedWorkflows).toContain('child1');
+  expect(dispatchedWorkflows).toContain('child2');
+});

@@ -65,18 +65,30 @@ export class WfRunner<
     const entries = Object.entries(workflows);
     
     if (this.dispatcher) {
-      // Dispatch all in parallel via dispatcher
-      const results = await Promise.all(entries.map(async ([key, workflow]) => {
+      // Dispatch all in parallel via dispatcher - start all immediately
+      const promises = entries.map(([key, workflow]) => {
         const foundWorkflow = findWorkflow(this.allWorkflows, workflow);
         const childJobId = `${parentJobId}:step:${stepIndex}:child:${key}`;
-        const output = await this.dispatcher!.dispatchAwaitingOutput(
+        const promise = this.dispatcher!.dispatchAwaitingOutput(
           foundWorkflow as any,
           input,
           { jobId: childJobId, meta },
         );
-        return [key, output] as const;
-      }));
-      return Object.fromEntries(results);
+        return promise.then(
+          (output) => ({ type: 'success' as const, key, output }),
+          (error) => ({ type: 'error' as const, key, error }),
+        );
+      });
+      
+      const settled = await Promise.all(promises);
+      const firstError = settled.find((r) => r.type === 'error');
+      if (firstError && firstError.type === 'error') {
+        throw firstError.error;
+      }
+      
+      return Object.fromEntries(
+        settled.map((r) => [r.key, r.type === 'success' ? r.output : undefined])
+      );
     }
     
     // Default: run all inline in parallel

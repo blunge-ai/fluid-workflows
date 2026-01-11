@@ -342,3 +342,23 @@ test('restart with invalid input fails schema validation', async () => {
 
   await expect(workflow.run({ count: 1, value: 10 })).rejects.toThrow();
 });
+
+test('.parallel() as first step', async () => {
+  const child1 = WfBuilder
+    .create({ name: 'first-parallel-child1', version: 1 })
+    .step(async ({ x }: { x: number }) => ({ a: x * 2 }));
+
+  const child2 = WfBuilder
+    .create({ name: 'first-parallel-child2', version: 1 })
+    .step(async ({ x }: { x: number }) => ({ b: x + 10 }));
+
+  const parent = WfBuilder
+    .create({ name: 'parent-first-parallel', version: 1 })
+    .parallel({ c1: child1, c2: child2 })
+    .step(async ({ c1, c2 }) => ({
+      result: c1.a + c2.b
+    }));
+
+  const result = await parent.run({ x: 5 });
+  expect(result.result).toBe(25); // (5 * 2) + (5 + 10) = 10 + 15 = 25
+});

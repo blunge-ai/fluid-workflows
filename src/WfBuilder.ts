@@ -146,10 +146,21 @@ export class WfBuilder<Input = Unset, Output = never, const Names extends string
     );
   }
 
+  // .parallel() as first step - infers workflow input from children
+  parallel<
+    ChildInput,
+    const Cm extends ParallelMap<ChildInput, ChildInput, Output>,
+  >(
+    this: WfBuilder<Unset, Output, Names, NextOutput, CtrlOutput>,
+    childrenMap: Cm
+  ): WfBuilder<ChildInput, MkOutput<CtrlOutput, ChildInput & ParallelOutputs<Cm, ChildInput, Output>>, Names | ParallelNames<Cm>, ChildInput & ParallelOutputs<Cm, ChildInput, Output>, CtrlOutput>;
   // .parallel() - invoke children with the full accumulated input, map outputs to keys
   parallel<
     const Cm extends ParallelMap<Input & NextOutput, Input, Output>,
-  >(childrenMap: Cm): WfBuilder<Input, MkOutput<CtrlOutput, Input & NextOutput & ParallelOutputs<Cm, Input, Output>>, Names | ParallelNames<Cm>, Input & NextOutput & ParallelOutputs<Cm, Input, Output>, CtrlOutput> {
+  >(childrenMap: Cm): WfBuilder<Input, MkOutput<CtrlOutput, Input & NextOutput & ParallelOutputs<Cm, Input, Output>>, Names | ParallelNames<Cm>, Input & NextOutput & ParallelOutputs<Cm, Input, Output>, CtrlOutput>;
+  parallel<
+    const Cm extends ParallelMap<any, any, any>,
+  >(childrenMap: Cm): WfBuilder<any, any, any, any, any> {
     return new WfBuilder(
       { name: this.name, version: this.version },
       [ ...this.stepFns, new StepsChildren(childrenMap) ],
