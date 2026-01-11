@@ -3,7 +3,7 @@ import type { WfJobData, Workflow, WfDispatcher, DispatchOptions } from '../type
 import { makeWorkflowJobData } from '../types';
 import { timeout } from '../utils';
 import { ValueOf, WfArray, NamesOfWfs } from '../typeHelpers';
-import { Config } from '../Config';
+import { JobQueueConfig } from './JobQueueConfig';
 import { WfRunner, SuspendExecutionException } from '../WfRunner';
 import type { JobResult, JobData } from './JobQueueEngine';
 
@@ -22,7 +22,7 @@ export class WfJobQueueWorker<
   const Qs extends Record<NamesOfWfs<Wfs>, string>
 > {
   constructor(
-    public readonly config: Config<Wfs, Qs>,
+    public readonly config: JobQueueConfig<Wfs, Qs>,
   ) {}
 
   private async runJob<Input, Output>(

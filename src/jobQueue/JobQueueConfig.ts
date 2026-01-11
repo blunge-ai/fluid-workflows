@@ -1,11 +1,13 @@
-import type { JobQueueEngine } from './jobQueue/JobQueueEngine';
-import type { Logger } from './utils';
-import { defaultLogger } from './utils';
-import type { WfArray, NamesOfWfs, RequireKeys } from './typeHelpers';
-import type { Workflow } from './types';
-import { collectWorkflows } from './WfBuilder';
+import type { JobQueueEngine } from './JobQueueEngine';
+import type { Logger } from '../utils';
+import { defaultLogger } from '../utils';
+import type { WfArray, NamesOfWfs, RequireKeys } from '../typeHelpers';
+import type { Workflow } from '../types';
+import { collectWorkflows } from '../WfBuilder';
+import { WfJobQueueWorker } from './WfJobQueueWorker';
+import { JobQueueWorkflowDispatcher } from './JobQueueWorkflowDispatcher';
 
-export class Config<
+export class JobQueueConfig<
   const Wfs extends WfArray<string>,
   const Qs extends Record<NamesOfWfs<Wfs>, string>
 > {
@@ -42,5 +44,17 @@ export class Config<
       throw Error(`queue not found for workflow ${name as string}`);
     }
     return q;
+  }
+
+  static create<const Wfs extends WfArray<string>, const Qs extends Record<NamesOfWfs<Wfs>, string>>(args: {
+    engine: JobQueueEngine,
+    workflows: Wfs,
+    queues: RequireKeys<Qs, NamesOfWfs<Wfs>>,
+    logger?: Logger,
+  }) {
+    const cfg = new JobQueueConfig<Wfs, Qs>(args);
+    const worker = new WfJobQueueWorker(cfg);
+    const dispatcher = new JobQueueWorkflowDispatcher(cfg);
+    return { worker, dispatcher } as const;
   }
 }

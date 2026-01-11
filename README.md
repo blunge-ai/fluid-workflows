@@ -15,9 +15,9 @@ npm install @blunge/fluid-workflows bullmq ioredis zod
 This defines a simple workflow with a single step that adds two numbers together.
 
 ```ts
-import { workflow } from '@blunge/fluid-workflows';
+import fwf from '@blunge/fluid-workflows';
 
-const wf = workflow({ name: 'add', version: 1 })
+const wf = fwf.create({ name: 'add', version: 1 })
   .step(async ({ a, b }: { a: number; b: number }) => ({ sum: a + b }));
 
 // Run the workflow directly (uses in-memory storage by default)
@@ -38,34 +38,34 @@ REDIS_URL=redis://127.0.0.1:6379 npm run test
 ## Using job queues
 
 ```ts
-import * as fwf from '@blunge/fluid-workflows';
+import fwf from '@blunge/fluid-workflows';
 
 // Workflow definitions
 
-const child = fwf.workflow({ name: 'child', version: 1 })
+const child = fwf.create({ name: 'child', version: 1 })
   .step(async ({ s }: { s: string }) => ({ s2: `child(${s})` }));
 
-const parent = fwf.workflow({ name: 'parent', version: 1 })
+const parent = fwf.create({ name: 'parent', version: 1 })
   .step(async ({ n }: { n: number }) => ({ s: `n=${n}` }))
   .step(child)
   .step(async ({ s2 }) => ({ out: s2 }));
 
 // Configuration
 
-const { runner, dispatcher } = fwf.config({
+const { worker, dispatcher } = fwf.jobQueueConfig({
   engine: new fwf.BullMqAdapter({ attempts: 1, lockTimeoutMs: 8000 }),
   workflows: [parent],
   queues: { parent: 'parent-queue, child: 'child-queue' } ,
 });
 
 // On a worker machine, run parent workflows
-const stopParent = runner.run(['parent-queue']);
+const stopParent = worker.run(['parent-queue']);
 
 // Possibly on a separate machine, run child workflows
-const stopChild = runner.run(['child-queue']);
+const stopChild = worker.run(['child-queue']);
 
 // Alternatively, run all workflows on the same machine
-// const stopAll = runner.run('all');
+// const stopAll = worker.run('all');
 
 // On the app server, dispatch workflows and optionally await the output
 const result = await dispatcher.dispatchAwaitingOutput(parent, { n: 5 });
@@ -83,13 +83,13 @@ Use `.parallel()` to run multiple child workflows in parallel. Each child receiv
 accumulated state, and their outputs are merged into the result with the specified keys.
 
 ```ts
-const child1 = fwf.workflow({ name: 'child1', version: 1 })
+const child1 = fwf.create({ name: 'child1', version: 1 })
   .step(async ({ n }: { n: number }) => `child1(${n})`);
 
-const child2 = fwf.workflow({ name: 'child2', version: 1 })
+const child2 = fwf.create({ name: 'child2', version: 1 })
   .step(async ({ n }: { n: number }) => `child2(${n})`);
 
-const parent = fwf.workflow({ name: 'parent', version: 1 })
+const parent = fwf.create({ name: 'parent', version: 1 })
   .step(async ({ n }: { n: number }) => ({ n2: n * 2 }))
   .parallel({ c1: child1, c2: child2 })
   .step(async ({ n, n2, c1, c2 }) => ({ 

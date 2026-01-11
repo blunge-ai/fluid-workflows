@@ -4,7 +4,7 @@ import { WfBuilder } from '~/WfBuilder';
 import { WfJobQueueWorker } from '~/jobQueue/WfJobQueueWorker';
 import { JobQueueWorkflowDispatcher } from '~/jobQueue/JobQueueWorkflowDispatcher';
 import { BullMqAdapter } from '~/jobQueue/BullMqAdapter';
-import { Config } from '~/Config';
+import { JobQueueConfig } from '~/jobQueue/JobQueueConfig';
 import { v4 as uuidv4 } from 'uuid';
 import { timeout } from '~/utils';
 
@@ -27,7 +27,7 @@ test('run step', async () => {
       return { c: a + b };
     });
 
-  const config = new Config({ engine, workflows: [workflow], queues: { 'add-a-and-b': queue } });
+  const config = new JobQueueConfig({ engine, workflows: [workflow], queues: { 'add-a-and-b': queue } });
   const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
   const stop = worker.run('all');
@@ -57,7 +57,7 @@ test('run child workflow', async () => {
     });
 
   const queues = { 'parent-workflow': queue, 'child-workflow': queue };
-  const config2 = new Config({ engine, workflows: [workflow, child], queues });
+  const config2 = new JobQueueConfig({ engine, workflows: [workflow, child], queues });
   const worker = new WfJobQueueWorker(config2);
   const dispatcher = new JobQueueWorkflowDispatcher(config2);
   const stop = worker.run('all');
@@ -94,7 +94,7 @@ test('run parallel children', async () => {
     });
 
   const queues = { 'parent-two-children': 'queue-a', child1: 'queue-b', child2: 'queue-c' } as const;
-  const config = new Config({ engine, workflows: [parent], queues });
+  const config = new JobQueueConfig({ engine, workflows: [parent], queues });
   const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
   const stop = worker.run(['queue-a', 'queue-b', 'queue-c']);
@@ -122,7 +122,7 @@ test('restart restarts from the beginning in WfJobQueueWorker', async () => {
       return { out: after };
     });
 
-  const config = new Config({ engine, workflows: [workflow], queues: { 'restart-runner': queue } });
+  const config = new JobQueueConfig({ engine, workflows: [workflow], queues: { 'restart-runner': queue } });
   const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
   const stop = worker.run('all');
@@ -142,7 +142,7 @@ test('output schema validation', async () => {
     .create({ name: 'output-schema-jq', version: 1, inputSchema, outputSchema })
     .step(async ({ a }) => ({ result: a * 2 }));
 
-  const config = new Config({ engine, workflows: [workflow], queues: { 'output-schema-jq': queue } });
+  const config = new JobQueueConfig({ engine, workflows: [workflow], queues: { 'output-schema-jq': queue } });
   const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
   const stop = worker.run('all');
@@ -162,7 +162,7 @@ test('output schema validation rejects invalid output', async () => {
     .create({ name: 'output-invalid-jq', version: 1, inputSchema, outputSchema })
     .step(async ({ a }) => ({ result: 'not-a-number' as any }));
 
-  const config = new Config({ engine, workflows: [workflow], queues: { 'output-invalid-jq': queue } });
+  const config = new JobQueueConfig({ engine, workflows: [workflow], queues: { 'output-invalid-jq': queue } });
   const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
   const stop = worker.run('all');
@@ -182,7 +182,7 @@ test('output schema validation with complete()', async () => {
     .step(async ({ a }, { complete }) => complete({ result: a * 2 }))
     .step(async () => ({ result: 9999 }));
 
-  const config = new Config({ engine, workflows: [workflow], queues: { 'complete-schema-jq': queue } });
+  const config = new JobQueueConfig({ engine, workflows: [workflow], queues: { 'complete-schema-jq': queue } });
   const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
   const stop = worker.run('all');
@@ -222,7 +222,7 @@ test('parallel dispatches all workflows before rethrowing error', async () => {
     'parallel-err-child1': 'queue-err-b', 
     'parallel-err-child2': 'queue-err-c',
   } as const;
-  const config = new Config({ engine, workflows: [parent], queues });
+  const config = new JobQueueConfig({ engine, workflows: [parent], queues });
   const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
   const stop = worker.run(['queue-err-a', 'queue-err-b', 'queue-err-c']);

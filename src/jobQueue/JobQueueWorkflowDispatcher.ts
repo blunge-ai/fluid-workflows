@@ -5,7 +5,7 @@ import type { JobResultStatus } from './JobQueueEngine';
 import { isResultStatus } from './JobQueueEngine';
 import { Logger, assert } from '../utils';
 import { WfArray, NamesOfWfs, MatchingWorkflow } from '../typeHelpers';
-import { Config } from '../Config';
+import { JobQueueConfig } from './JobQueueConfig';
 import type { WfDispatcher, DispatchOptions } from '../types';
 
 export type Opts = {
@@ -16,14 +16,14 @@ export interface JobQueueWorkflowDispatcherInterface<
   Wfs extends WfArray<string>,
   Qs extends Record<NamesOfWfs<Wfs>, string>
 > extends WfDispatcher<Wfs> {
-  readonly config: Config<Wfs, Qs>;
+  readonly config: JobQueueConfig<Wfs, Qs>;
 }
 
 export class JobQueueWorkflowDispatcher<
   const Wfs extends WfArray<string>,
   const Qs extends Record<NamesOfWfs<Wfs>, string>
 > implements JobQueueWorkflowDispatcherInterface<Wfs, Qs> {
-  constructor(public readonly config: Config<Wfs, Qs>) {}
+  constructor(public readonly config: JobQueueConfig<Wfs, Qs>) {}
 
   async dispatch<N extends string, Input, Output, No, Co, Meta = unknown>(
     props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, NamesOfWfs<Wfs>, Input, Output, No, Co>,
