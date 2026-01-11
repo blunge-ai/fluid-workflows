@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fluid-workflows-test",
+  "main": "src/test/cloudflare-worker.ts",
+  "compatibility_date": "2024-12-01",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TEST_DO",
+        "class_name": "TestDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TestDurableObject"]
+    }
+  ]
+}

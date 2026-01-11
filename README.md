@@ -2,7 +2,7 @@
 
 Type-safe durable workflows with fluid builder syntax and optional job-queue execution with adapters.
 
-The main problem this project attempts to solve is the separation of workflow definition from how they are executed. Execution can involve persisting intermediary steps through a storage adapter (e.g. redis, or cloudflare durable objects) as well as queueing jobs using a queueing adapater (e.g. BullMq, or cloudflare queues).
+The main problem this project attempts to solve is the separation of workflow definition from execution. Execution can involve persisting intermediary steps through a storage adapter (e.g. redis, or cloudflare durable objects) or using queues with a queueing adapater (e.g. BullMq, or cloudflare queues).
 
 ## Install
 

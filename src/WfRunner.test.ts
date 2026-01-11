@@ -1,8 +1,12 @@
-import { expect, test } from 'vitest'
+import { expect, test, beforeEach } from 'vitest'
 import { z } from 'zod';
 import { WfBuilder } from '~/WfBuilder';
 import { WfRunner, SuspendExecutionException } from '~/WfRunner';
-import { MemoryStorage } from '~/storage/MemoryStorage';
+import { defaultStorage, resetDefaultStorage } from '~/storage/defaultStorage';
+
+beforeEach(() => {
+  resetDefaultStorage();
+});
 
 test('run step', async () => {
   const workflow = WfBuilder
@@ -135,7 +139,7 @@ test('durable execution: resume after shutdown', async () => {
     });
 
   // Use shared storage so state persists between runs
-  const storage = new MemoryStorage();
+  const storage = defaultStorage;
   const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 60000, storage });
   const jobId = 'test-durable-job-123';
 
@@ -176,7 +180,7 @@ test('durable execution: new job if no existing state', async () => {
     .create({ name: 'new-job-test', version: 1 })
     .step(async ({ x }: { x: number }) => ({ result: x + 1 }));
 
-  const storage = new MemoryStorage();
+  const storage = defaultStorage;
   const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 60000, storage });
 
   // Run with a jobId that doesn't exist - should create new job
@@ -195,7 +199,7 @@ test('durable execution: validates workflow name on resume', async () => {
     .create({ name: 'workflow-two', version: 1 })
     .step(async () => ({ done: true }));
 
-  const storage = new MemoryStorage();
+  const storage = defaultStorage;
   const runner = new WfRunner({ workflows: [workflow1, workflow2], lockTimeoutMs: 60000, storage });
   const jobId = 'mismatched-job';
 
@@ -218,7 +222,7 @@ test('durable execution: validates workflow version on resume', async () => {
     .create({ name: 'versioned-workflow', version: 2 })
     .step(async () => ({ done: true }));
 
-  const storage = new MemoryStorage();
+  const storage = defaultStorage;
   
   // Start with v1
   const runner1 = new WfRunner({ workflows: [workflowV1], lockTimeoutMs: 60000, storage });
