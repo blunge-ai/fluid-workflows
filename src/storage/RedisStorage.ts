@@ -1,7 +1,7 @@
 import Redis from 'ioredis';
 import type { Storage } from './Storage';
-import { pack, unpack } from './packer';
-import { defaultRedisConnection } from './utils';
+import { pack, unpack } from '../utils/packer';
+import { defaultRedisConnection } from '../utils/redis';
 
 export class RedisStorage implements Storage {
   private readonly redis: Redis;

@@ -1,20 +1,20 @@
 export {
- Workflow,
- runQueueless,
-} from './Workflow';
+ WorkflowBuilder,
+} from './WorkflowBuilder';
 export type {
+ Workflow,
  WorkflowProps,
  WorkflowRunOptions,
  ProgressFn,
  StepFn,
-} from './Workflow';
+} from './WorkflowBuilder';
 
 export {
   withRestartWrapper,
   withCompleteWrapper,
   isRestartWrapper,
   isCompleteWrapper,
-} from './Workflow';
+} from './WorkflowBuilder';
 export {
  JobQueueWorkflowRunner
 } from './jobQueue/JobQueueWorkflowRunner';
@@ -25,18 +25,18 @@ export type { JobQueueWorkflowDispatcherInterface } from './jobQueue/JobQueueWor
 export { Config } from './Config';
 export { BullMqAdapter } from './jobQueue/BullMqAdapter';
 export { WorkflowRunner } from './WorkflowRunner';
-export type { Storage } from './Storage';
-export { RedisStorage } from './RedisStorage';
-export { MemoryStorage } from './MemoryStorage';
+export type { Storage } from './storage/Storage';
+export { RedisStorage } from './storage/RedisStorage';
+export { MemoryStorage } from './storage/MemoryStorage';
 export { InMemoryJobQueueAdapter } from './jobQueue/InMemoryJobQueueAdapter';
 export { HttpJobQueueEngineClient } from './jobQueue/HttpJobQueueEngineClient';
 export { HttpJobQueueEngineServer } from './jobQueue/HttpJobQueueEngineServer';
-export type { WorkflowDispatcher, DispatchOptions } from './WorkflowDispatcher';
+export type { WorkflowDispatcher, DispatchOptions, Runner, RunOptions } from './types';
 
 import { Config } from './Config';
 import { JobQueueWorkflowRunner } from './jobQueue/JobQueueWorkflowRunner';
 import { JobQueueWorkflowDispatcher } from './jobQueue/JobQueueWorkflowDispatcher';
-import { Workflow } from './Workflow';
+import { WorkflowBuilder } from './WorkflowBuilder';
 import type { JobQueueEngine } from './jobQueue/JobQueueEngine';
 import type { Logger } from './utils';
 import type { WfArray, NamesOfWfs, RequireKeys } from './typeHelpers';
@@ -47,10 +47,10 @@ export function config<const Wfs extends WfArray<string>, const Qs extends Recor
   queues: RequireKeys<Qs, NamesOfWfs<Wfs>>,
   logger?: Logger,
 }) {
-  const cfg = new Config<NamesOfWfs<Wfs>, Wfs, Qs>(args);
+  const cfg = new Config<Wfs, Qs>(args);
   const runner = new JobQueueWorkflowRunner(cfg);
   const dispatcher = new JobQueueWorkflowDispatcher(cfg);
   return { runner, dispatcher } as const;
 }
 
-export const workflow: typeof Workflow.create = Workflow.create;
+export const workflow: typeof WorkflowBuilder.create = WorkflowBuilder.create;

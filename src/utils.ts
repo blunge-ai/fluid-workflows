@@ -1,23 +1,9 @@
-import Redis from 'ioredis';
-
 type IsPlainObject<T> = T extends Record<string, unknown> ? true : false;
 
 export type Simplify<T> =
   IsPlainObject<T> extends true
     ? { [KeyType in keyof T]: Simplify<T[KeyType]> }
     : T;
-
-export const redisOptions ={
-  //family: 6, // IPv6 required for fly.io
-  enableOfflineQueue: true,
-  maxRetriesPerRequest: null,
-  reconnectOnError: () => true,
-  commandTimeout: 30000, // in ms; must not be lower than bullWorkerBlockingTimeout
-};
-
-export function defaultRedisConnection() {
-  return new Redis(process.env.REDIS_URL ?? '', redisOptions);
-}
 
 export function timeout(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

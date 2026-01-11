@@ -1,4 +1,4 @@
-import { WorkflowProps } from "./Workflow"
+import { WorkflowProps } from "./types"
 
 // The job data (or state) used by the JobQueueWorkflowRunner to run a workflow
 

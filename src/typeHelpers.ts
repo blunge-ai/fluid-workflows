@@ -1,13 +1,13 @@
-import { Workflow } from './Workflow';
+import type { Workflow } from './types';
 
 export type RequireKeys<T, K extends PropertyKey>
   = K extends keyof T ? T : never;
 
 export type WfArray<Names extends string>
-  = Workflow<any, any, Names, any, any>[];
+  = readonly Workflow<any, any, Names, any, any>[];
 
 export type NamesOfWfs<Wfs extends WfArray<string>>
-   = Wfs[number] extends Workflow<any, any, infer N, any, any> ? N : never;
+   = Wfs[number]['name'];
 
 export type QueuesOption<
   Wfs extends WfArray<Names>,

@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import type { JobQueueEngine } from './JobQueueEngine';
-import { pack, unpack } from '../packer';
+import { pack, unpack } from '../utils/packer';
 
 function readPacked(req: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {

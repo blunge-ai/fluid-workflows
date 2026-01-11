@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
-import { Workflow } from '~/Workflow';
+import { WorkflowBuilder as Workflow } from '~/WorkflowBuilder';
 import { JobQueueWorkflowRunner } from '~/jobQueue/JobQueueWorkflowRunner';
 import { JobQueueWorkflowDispatcher } from '~/jobQueue/JobQueueWorkflowDispatcher';
 import { BullMqAdapter } from '~/jobQueue/BullMqAdapter';

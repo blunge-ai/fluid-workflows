@@ -2,12 +2,11 @@ import type { JobQueueEngine } from './jobQueue/JobQueueEngine';
 import type { Logger } from './utils';
 import { defaultLogger } from './utils';
 import type { WfArray, NamesOfWfs, RequireKeys } from './typeHelpers';
-import type { Workflow } from './Workflow';
-import { collectWorkflows } from './Workflow';
+import type { Workflow } from './types';
+import { collectWorkflows } from './WorkflowBuilder';
 
 export class Config<
-  const Names extends NamesOfWfs<Wfs>,
-  const Wfs extends WfArray<Names>,
+  const Wfs extends WfArray<string>,
   const Qs extends Record<NamesOfWfs<Wfs>, string>
 > {
   public readonly engine: JobQueueEngine;

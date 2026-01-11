@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
-import { Workflow } from '~/Workflow';
+import { WorkflowBuilder as Workflow } from '~/WorkflowBuilder';
 import { WorkflowRunner } from '~/index';
 test('run step', async () => {
   const workflow = Workflow

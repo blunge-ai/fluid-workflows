@@ -1,11 +1,11 @@
 import { expect, test } from 'vitest';
 import * as fwf from '~/index';
 
-test('runQueueless example', async () => {
+test('workflow.run() example', async () => {
   const wf = fwf.workflow({ name: 'add', version: 1 })
     .step(async ({ a, b }: { a: number; b: number }) => ({ sum: a + b }));
 
-  const out = await fwf.runQueueless(wf, { a: 2, b: 3 });
+  const out = await wf.run({ a: 2, b: 3 });
   expect(out.sum).toBe(5);
 });
 

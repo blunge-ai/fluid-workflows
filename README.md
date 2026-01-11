@@ -11,18 +11,18 @@ execution.
 npm install @blunge/fluid-workflows bullmq ioredis zod
 ```
 
-## Quick Start (queueless for testing)
+## Quick Start
 
-This defines a simple workflow with a single step that adds two numbers togther.
+This defines a simple workflow with a single step that adds two numbers together.
 
 ```ts
-import * as fwf from '@blunge/fluid-workflows';
+import { workflow } from '@blunge/fluid-workflows';
 
-const wf = fwf.workflow({ name: 'add', version: 1 })
+const wf = workflow({ name: 'add', version: 1 })
   .step(async ({ a, b }: { a: number; b: number }) => ({ sum: a + b }));
 
-// Runs the workflow in the current process to completion, useful for testing
-const out = await fwf.runQueueless(wf, { a: 2, b: 3 });
+// Run the workflow directly (uses in-memory storage by default)
+const out = await wf.run({ a: 2, b: 3 });
 console.log(out.sum); // 5
 ```
 
@@ -134,7 +134,7 @@ const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
      // will never reach here
   });
 
-const out = await fwf.runQueueless(wf, { iterations: 0 });
+const out = await wf.run({ iterations: 0 });
 console.log(out.iterations); // 10
 ```
 

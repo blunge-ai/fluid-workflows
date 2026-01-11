@@ -1,34 +1,32 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, findWorkflow } from '../Workflow';
+import { Workflow, findWorkflow } from '../WorkflowBuilder';
 import { makeWorkflowJobData } from '../WorkflowJob';
 import type { JobResultStatus } from './JobQueueEngine';
 import { isResultStatus } from './JobQueueEngine';
 import { Logger, assert } from '../utils';
 import { WfArray, NamesOfWfs, MatchingWorkflow } from '../typeHelpers';
 import { Config } from '../Config';
-import type { WorkflowDispatcher, DispatchOptions } from '../WorkflowDispatcher';
+import type { WorkflowDispatcher, DispatchOptions } from '../types';
 
 export type Opts = {
   logger: Logger,
 };
 
 export interface JobQueueWorkflowDispatcherInterface<
-  Names extends NamesOfWfs<Wfs>,
-  Wfs extends WfArray<Names>,
+  Wfs extends WfArray<string>,
   Qs extends Record<NamesOfWfs<Wfs>, string>
-> extends WorkflowDispatcher<Names, Wfs> {
-  readonly config: Config<Names, Wfs, Qs>;
+> extends WorkflowDispatcher<Wfs> {
+  readonly config: Config<Wfs, Qs>;
 }
 
 export class JobQueueWorkflowDispatcher<
-  const Names extends NamesOfWfs<Wfs>,
-  const Wfs extends WfArray<Names>,
+  const Wfs extends WfArray<string>,
   const Qs extends Record<NamesOfWfs<Wfs>, string>
-> implements JobQueueWorkflowDispatcherInterface<Names, Wfs, Qs> {
-  constructor(public readonly config: Config<Names, Wfs, Qs>) {}
+> implements JobQueueWorkflowDispatcherInterface<Wfs, Qs> {
+  constructor(public readonly config: Config<Wfs, Qs>) {}
 
   async dispatch<N extends string, Input, Output, No, Co, Meta = unknown>(
-    props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
+    props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, NamesOfWfs<Wfs>, Input, Output, No, Co>,
     input: Input,
     opts?: DispatchOptions<Meta>,
   ) {
@@ -46,7 +44,7 @@ export class JobQueueWorkflowDispatcher<
   }
   
   async dispatchAwaitingOutput<const N extends string, Input, Output, No, Co, Meta = unknown>(
-    props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, Names, Input, Output, No, Co>,
+    props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, NamesOfWfs<Wfs>, Input, Output, No, Co>,
     input: Input,
     opts?: DispatchOptions<Meta>,
   ) {

@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, WorkflowRunOptions, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper, isCompleteWrapper, withCompleteWrapper, isStepsChildren } from '../Workflow';
-import type { StepFn } from '../Workflow';
+import type { Workflow, WorkflowRunOptions, StepFn } from '../types';
+import { WorkflowBuilder, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper, isCompleteWrapper, withCompleteWrapper, isStepsChildren } from '../WorkflowBuilder';
 import type { JobData, JobResult, JobStatusType } from './JobQueueEngine';
 import { timeout, assertNever, assert } from '../utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from '../WorkflowJob';
@@ -8,11 +8,10 @@ import { WfArray, NamesOfWfs, ValueOf } from '../typeHelpers';
 import { Config } from '../Config';
 
 export class JobQueueWorkflowRunner<
-  const Names extends NamesOfWfs<Wfs>,
-  const Wfs extends WfArray<Names>,
+  const Wfs extends WfArray<string>,
   const Qs extends Record<NamesOfWfs<Wfs>, string>
 >{
-  constructor(public readonly config: Config<Names, Wfs, Qs>) {}
+  constructor(public readonly config: Config<Wfs, Qs>) {}
 
   async runSteps<Input, Output>(
     workflow: Workflow<Input, Output>,
@@ -50,7 +49,7 @@ export class JobQueueWorkflowRunner<
       }
 
       const step = workflow.stepFns[currentStep];
-      if (typeof step === 'function' && !(step instanceof Workflow)) {
+      if (typeof step === 'function' && !(step instanceof WorkflowBuilder)) {
         // handle step function
         if (childResults) {
           throw Error('encountered child results when running a step function');
@@ -76,7 +75,7 @@ export class JobQueueWorkflowRunner<
       } else if (isStepsChildren(step)) {
         // handle .parallel() - run functions inline, submit workflows as children
         const entries = Object.entries(step.children);
-        const workflowEntries = entries.filter(([_, item]) => item instanceof Workflow) as [string, Workflow<unknown, unknown>][];
+        const workflowEntries = entries.filter(([_, item]) => item instanceof WorkflowBuilder) as [string, Workflow<unknown, unknown>][];
         const fnEntries = entries.filter(([_, item]) => typeof item === 'function') as [string, StepFn<unknown, unknown, Input, Output>][];
 
         // Run functions in parallel inline

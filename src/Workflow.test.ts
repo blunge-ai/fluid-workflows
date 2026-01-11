@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
-import { Workflow, runQueueless } from '~/Workflow';
+import { WorkflowBuilder as Workflow } from '~/WorkflowBuilder';
 
 test('run step', async () => {
 
@@ -10,7 +10,7 @@ test('run step', async () => {
       return { c: a + b };
     });
 
-  const result = await runQueueless(workflow, { a: 12, b: 34 });
+  const result = await workflow.run({ a: 12, b: 34 });
 
   expect(result.c).toBe(46);
 });
@@ -33,7 +33,7 @@ test('run child workflow', async () => {
       return { output: `output(${childOutput})` };
     });
 
-  const result = await runQueueless(workflow, { inputString: 'XX' });
+  const result = await workflow.run({ inputString: 'XX' });
 
   expect(result.output).toBe('output(child(input(XX)))');
 });
@@ -48,15 +48,15 @@ test('zod input schema', async () => {
       return complete({ sum: a + b });
     });
 
-  const result = await runQueueless(workflow, { a: 2, b: 3 });
+  const result = await workflow.run({ a: 2, b: 3 });
   expect(result.sum).toBe(5);
 });
 
-test('complete finishes the workflow early in runQueueless', async () => {
+test('complete finishes the workflow early', async () => {
   const schema = z.object({ a: z.number(), b: z.number() });
 
   const workflow = Workflow
-    .create({ name: 'complete-queueless', version: 1, inputSchema: schema })
+    .create({ name: 'complete-test', version: 1, inputSchema: schema })
     .step(async ({ a, b }, { complete }) => {
       if (a + b === 5) {
         return complete({ sum: 5 });
@@ -67,15 +67,15 @@ test('complete finishes the workflow early in runQueueless', async () => {
       return { sum: 9999 };
     });
 
-  const result = await runQueueless(workflow, { a: 2, b: 3 });
+  const result = await workflow.run({ a: 2, b: 3 });
   expect(result.sum).toBe(5);
 });
 
-test('restart restarts from the beginning in runQueueless', async () => {
+test('restart restarts from the beginning', async () => {
   const schema = z.object({ iterations: z.number(), value: z.number() });
 
   const workflow = Workflow
-    .create({ name: 'restart-queueless', version: 1, inputSchema: schema })
+    .create({ name: 'restart-test', version: 1, inputSchema: schema })
     .step(async (input, { restart }) => {
       if (input.iterations > 0) {
         return restart({ iterations: input.iterations - 1, value: input.value + 1 });
@@ -86,7 +86,7 @@ test('restart restarts from the beginning in runQueueless', async () => {
       return { out: after };
     });
 
-  const result = await runQueueless(workflow, { iterations: 3, value: 10 });
+  const result = await workflow.run({ iterations: 3, value: 10 });
   expect(result.out).toBe(13);
 });
 
@@ -107,7 +107,7 @@ test('.parallel() runs children with full accumulated input', async () => {
       out: `final(${s}, ${s2}, ${s3}, ${s4})`
     }));
 
-  const result = await runQueueless(parent, { s: 'input' });
+  const result = await parent.run({ s: 'input' });
   expect(result.out).toBe('final(input, step1(input), child3(input, step1(input)), child4(input, step1(input)))');
 });
 
@@ -123,7 +123,7 @@ test('.step(workflow) as first step', async () => {
       result: x + y
     }));
 
-  const result = await runQueueless(parent, { x: 5 });
+  const result = await parent.run({ x: 5 });
   expect(result.result).toBe(15); // 5 + 10
 });
 
@@ -139,7 +139,7 @@ test('.parallel() with functions', async () => {
       result: a + b
     }));
 
-  const result = await runQueueless(parent, { x: 3 });
+  const result = await parent.run({ x: 3 });
   // y = 6, a = 3 + 6 = 9, b = 3 * 6 = 18, result = 27
   expect(result.result).toBe(27);
 });
@@ -160,7 +160,7 @@ test('.parallel() with mixed workflows and functions', async () => {
       result: fromWf.z + fromFn
     }));
 
-  const result = await runQueueless(parent, { x: 3 });
+  const result = await parent.run({ x: 3 });
   // y = 6, fromWf.z = 3 + 6 = 9, fromFn = 3 * 6 = 18, result = 27
   expect(result.result).toBe(27);
 });
