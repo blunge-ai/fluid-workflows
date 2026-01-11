@@ -126,3 +126,41 @@ test('.step(workflow) as first step', async () => {
   const result = await runQueueless(parent, { x: 5 });
   expect(result.result).toBe(15); // 5 + 10
 });
+
+test('.parallel() with functions', async () => {
+  const parent = Workflow
+    .create({ name: 'parent-parallel-fns', version: 1 })
+    .step(async ({ x }: { x: number }) => ({ y: x * 2 }))
+    .parallel({
+      a: async ({ x, y }) => x + y,
+      b: async ({ x, y }) => x * y,
+    })
+    .step(async ({ a, b }) => ({
+      result: a + b
+    }));
+
+  const result = await runQueueless(parent, { x: 3 });
+  // y = 6, a = 3 + 6 = 9, b = 3 * 6 = 18, result = 27
+  expect(result.result).toBe(27);
+});
+
+test('.parallel() with mixed workflows and functions', async () => {
+  const child = Workflow
+    .create({ name: 'parallel-child', version: 1 })
+    .step(async ({ x, y }: { x: number, y: number }) => ({ z: x + y }));
+
+  const parent = Workflow
+    .create({ name: 'parent-parallel-mixed', version: 1 })
+    .step(async ({ x }: { x: number }) => ({ y: x * 2 }))
+    .parallel({
+      fromWf: child,
+      fromFn: async ({ x, y }) => x * y,
+    })
+    .step(async ({ fromWf, fromFn }) => ({
+      result: fromWf.z + fromFn
+    }));
+
+  const result = await runQueueless(parent, { x: 3 });
+  // y = 6, fromWf.z = 3 + 6 = 9, fromFn = 3 * 6 = 18, result = 27
+  expect(result.result).toBe(27);
+});

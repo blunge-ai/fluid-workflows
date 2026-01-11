@@ -74,46 +74,66 @@ export class JobQueueWorkflowRunner<
           result = { ...(result as Record<string, unknown>), ...(out as Record<string, unknown>) };
         }
       } else if (isStepsChildren(step)) {
-        // handle .steps() - pass full accumulated input to each child, merge outputs
-        const entries = Object.entries(step.children as Record<string, Workflow<unknown, unknown>>);
-        const childrenPayload = entries.map(([key, childWorkflow]) => {
-          const childQueue = this.config.queueFor(childWorkflow.name as any);
-          return {
-            data: {
-              id: `${job.id}:step:${currentStep}:child:${key}`,
-              input: makeWorkflowJobData({
-                props: childWorkflow,
-                input: result  // pass full accumulated input
-              }),
-              meta: undefined,
-            },
-            queue: childQueue
-          };
-        });
-        if (!childResults) {
-          const maybeResults = await this.config.engine.submitChildrenSuspendParent<unknown>({
-            token,
-            children: childrenPayload,
-            parentId: job.id,
-            parentQueue: queue,
-          });
-          if (!maybeResults) {
-            return { status: 'suspended' };
+        // handle .parallel() - run functions inline, submit workflows as children
+        const entries = Object.entries(step.children);
+        const workflowEntries = entries.filter(([_, item]) => item instanceof Workflow) as [string, Workflow<unknown, unknown>][];
+        const fnEntries = entries.filter(([_, item]) => typeof item === 'function') as [string, StepFn<unknown, unknown, Input, Output>][];
+
+        // Run functions in parallel inline
+        const fnOutputs = await Promise.all(fnEntries.map(async ([key, fn]) => {
+          const out = await fn(result, runOptions);
+          if (isRestartWrapper(out)) {
+            throw new Error('restart() not supported inside parallel()');
           }
-          childResults = maybeResults;
-        }
-        // unwrap results and merge with existing result
-        const outputs = Object.fromEntries(entries.map(([key]) => {
-          assert(childResults);
-          const childResult = childResults[`${job.id}:step:${currentStep}:child:${key}`];
-          assert(childResult);
-          if (childResult.type !== 'success') {
-            throw Error('error running child job');
+          if (isCompleteWrapper(out)) {
+            throw new Error('complete() not supported inside parallel()');
           }
-          return [key, childResult.output];
+          return [key, out] as const;
         }));
+        const fnOutputRecord = Object.fromEntries(fnOutputs);
+
+        // Submit workflow children if any
+        let workflowOutputRecord: Record<string, unknown> = {};
+        if (workflowEntries.length > 0) {
+          const childrenPayload = workflowEntries.map(([key, childWorkflow]) => {
+            const childQueue = this.config.queueFor(childWorkflow.name as any);
+            return {
+              data: {
+                id: `${job.id}:step:${currentStep}:child:${key}`,
+                input: makeWorkflowJobData({
+                  props: childWorkflow,
+                  input: result  // pass full accumulated input
+                }),
+                meta: undefined,
+              },
+              queue: childQueue
+            };
+          });
+          if (!childResults) {
+            const maybeResults = await this.config.engine.submitChildrenSuspendParent<unknown>({
+              token,
+              children: childrenPayload,
+              parentId: job.id,
+              parentQueue: queue,
+            });
+            if (!maybeResults) {
+              return { status: 'suspended' };
+            }
+            childResults = maybeResults;
+          }
+          // unwrap results
+          workflowOutputRecord = Object.fromEntries(workflowEntries.map(([key]) => {
+            assert(childResults);
+            const childResult = childResults[`${job.id}:step:${currentStep}:child:${key}`];
+            assert(childResult);
+            if (childResult.type !== 'success') {
+              throw Error('error running child job');
+            }
+            return [key, childResult.output];
+          }));
+        }
         childResults = undefined;
-        result = { ...(result as Record<string, unknown>), ...outputs };
+        result = { ...(result as Record<string, unknown>), ...fnOutputRecord, ...workflowOutputRecord };
       } else {
         // handle .step(workflow) - single child workflow
         const childWorkflow = step as unknown as Workflow<unknown, unknown>;

@@ -36,15 +36,24 @@ type OutputsOfChildren<Cm>
 type ChildrenNames<Cm>
   = Cm[keyof Cm] extends Workflow<any, any, infer N, any, any> ? N : never;
 
-// For .steps() - children that receive the full accumulated input
-export type StepsChildrenMap<Input, Cn extends string>
-  = { [K in string]: Workflow<Input, any, Cn, any, any> };
+// For .parallel() - items can be workflows or functions
+export type ParallelItem<Input, WfInput, WfOutput>
+  = Workflow<Input, any, string, any, any>
+  | StepFn<Input, any, WfInput, WfOutput>;
 
-type StepsOutputsOfChildren<Cm>
-  = { [K in keyof Cm]: Cm[K] extends Workflow<any, infer O, string, any, any> ? O : never };
+export type ParallelMap<Input, WfInput, WfOutput>
+  = { [K in string]: ParallelItem<Input, WfInput, WfOutput> };
 
-// Wrapper class to distinguish .steps() from .childStep() at runtime
-export class StepsChildren<Cm extends Record<string, Workflow<any, any, string, any, any>>> {
+type ParallelOutputs<Cm, WfInput, WfOutput>
+  = { [K in keyof Cm]: Cm[K] extends Workflow<any, infer O, string, any, any> ? O
+    : Cm[K] extends StepFn<any, infer O, WfInput, WfOutput> ? StripCtrl<O>
+    : never };
+
+type ParallelNames<Cm>
+  = Cm[keyof Cm] extends Workflow<any, any, infer N, any, any> ? N : never;
+
+// Wrapper class to distinguish .parallel() at runtime
+export class StepsChildren<Cm extends Record<string, Workflow<any, any, string, any, any> | StepFn<any, any, any, any>>> {
   public __type = 'StepsChildren' as const;
   constructor(public children: Cm) {}
 }
@@ -177,9 +186,8 @@ export class Workflow<Input = Unset, Output = never, const Names extends string 
 
   // .parallel() - invoke children with the full accumulated input, map outputs to keys
   parallel<
-    const Cm extends StepsChildrenMap<Input & NextOutput, Cn>,
-    const Cn extends string,
-  >(childrenMap: Cm): Workflow<Input, MkOutput<CtrlOutput, Input & NextOutput & StepsOutputsOfChildren<Cm>>, Names | ChildrenNames<Cm>, Input & NextOutput & StepsOutputsOfChildren<Cm>, CtrlOutput> {
+    const Cm extends ParallelMap<Input & NextOutput, Input, Output>,
+  >(childrenMap: Cm): Workflow<Input, MkOutput<CtrlOutput, Input & NextOutput & ParallelOutputs<Cm, Input, Output>>, Names | ParallelNames<Cm>, Input & NextOutput & ParallelOutputs<Cm, Input, Output>, CtrlOutput> {
     return new Workflow(
       { name: this.name, version: this.version },
       [ ...this.stepFns, new StepsChildren(childrenMap) ],
@@ -245,9 +253,24 @@ export async function runQueueless<Input, Output, Names extends string, NextOutp
         result = { ...(result as Record<string, unknown>), ...(stepResult as Record<string, unknown>) };
       }
     } else if (isStepsChildren(step)) {
-      // .parallel() - pass full accumulated input to each child, merge outputs into result
+      // .parallel() - pass full accumulated input to each child/function, merge outputs into result
       const entries = Object.entries(step.children);
-      const outputs = await Promise.all(entries.map(([_key, child]) => runQueueless(child as any, result)));
+      const outputs = await Promise.all(entries.map(async ([_key, item]) => {
+        if (item instanceof Workflow) {
+          return runQueueless(item as any, result);
+        } else {
+          // It's a function
+          const stepFn = item as StepFn<unknown, unknown, Input, Output>;
+          const stepResult = await stepFn(result, runOptions);
+          if (isRestartWrapper(stepResult)) {
+            throw new Error('restart() not supported inside parallel()');
+          }
+          if (isCompleteWrapper(stepResult)) {
+            throw new Error('complete() not supported inside parallel()');
+          }
+          return stepResult;
+        }
+      }));
       const outputRecord = Object.fromEntries(entries.map(([key], i) => [key, outputs[i]]));
       result = { ...(result as Record<string, unknown>), ...outputRecord };
     }
