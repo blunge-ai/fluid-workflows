@@ -121,7 +121,7 @@ The control flow functions only wrap the argument and return it, and the wrapped
 returned by the step to indicate to the workflow runner what shoud happen next.
 
 ```ts
-const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
+const wf = fwf.workflow({ name: 'iterate', version: 1, inputSchema })
   .step(async ({ iterations }, { restart, complete }) => ({
      if (iterations < 10) {
        return restart({ iterations: iterations + 1 });

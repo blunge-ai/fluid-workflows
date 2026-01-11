@@ -1,7 +1,8 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
 import { WfBuilder } from '~/WfBuilder';
-import { WfRunner } from '~/index';
+import { WfRunner, TestSystemShutdownException } from '~/WfRunner';
+import { MemoryStorage } from '~/storage/MemoryStorage';
 
 test('run step', async () => {
   const workflow = WfBuilder
@@ -111,4 +112,121 @@ test('restart restarts from the beginning', async () => {
   const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
   const result = await runner.run(workflow, { iterations: 3, value: 10 });
   expect(result.out).toBe(13);
+});
+
+test('durable execution: resume after shutdown', async () => {
+  let runCount = 0;
+  
+  const workflow = WfBuilder
+    .create({ name: 'durable-test', version: 1 })
+    .step(async ({ value }: { value: number }) => {
+      return { step1Result: value * 2 };
+    })
+    .step(async ({ step1Result }) => {
+      runCount++;
+      // Throw shutdown exception only on the first run
+      if (runCount === 1) {
+        throw new TestSystemShutdownException('Simulated shutdown');
+      }
+      return { step2Result: step1Result + 10 };
+    })
+    .step(async ({ step2Result }) => {
+      return { finalResult: step2Result * 3 };
+    });
+
+  // Use shared storage so state persists between runs
+  const storage = new MemoryStorage();
+  const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 60000, storage });
+  const jobId = 'test-durable-job-123';
+
+  // First run: should abort at step 2 with TestSystemShutdownException
+  await expect(runner.run(workflow, { value: 5 }, { jobId }))
+    .rejects.toThrow(TestSystemShutdownException);
+  
+  // Get active jobs from storage - should find our interrupted job
+  const activeJobs = await storage.getActiveJobs();
+  expect(activeJobs).toHaveLength(1);
+  const activeJob = activeJobs[0]!;
+  expect(activeJob.jobId).toBe(jobId);
+  expect(activeJob.state).toMatchObject({
+    name: 'durable-test',
+    version: 1,
+    currentStep: 1,  // At step 2 (0-indexed)
+    input: { value: 5, step1Result: 10 },  // Step 1 result merged
+  });
+
+  // Resume the job using its jobId (discovered from getActiveJobs)
+  const result = await runner.resume<{ finalResult: number }>(activeJob.jobId);
+  
+  // step1Result = 5 * 2 = 10
+  // step2Result = 10 + 10 = 20
+  // finalResult = 20 * 3 = 60
+  expect(result.finalResult).toBe(60);
+  
+  // Verify step 2 was only run once on the second invocation
+  expect(runCount).toBe(2);
+
+  // Verify job is no longer in active jobs after completion
+  const activeJobsAfter = await storage.getActiveJobs();
+  expect(activeJobsAfter).toHaveLength(0);
+});
+
+test('durable execution: new job if no existing state', async () => {
+  const workflow = WfBuilder
+    .create({ name: 'new-job-test', version: 1 })
+    .step(async ({ x }: { x: number }) => ({ result: x + 1 }));
+
+  const storage = new MemoryStorage();
+  const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 60000, storage });
+
+  // Run with a jobId that doesn't exist - should create new job
+  const result = await runner.run(workflow, { x: 10 }, { jobId: 'new-job-id' });
+  expect(result.result).toBe(11);
+});
+
+test('durable execution: validates workflow name on resume', async () => {
+  const workflow1 = WfBuilder
+    .create({ name: 'workflow-one', version: 1 })
+    .step(async () => {
+      throw new TestSystemShutdownException();
+    });
+
+  const workflow2 = WfBuilder
+    .create({ name: 'workflow-two', version: 1 })
+    .step(async () => ({ done: true }));
+
+  const storage = new MemoryStorage();
+  const runner = new WfRunner({ workflows: [workflow1, workflow2], lockTimeoutMs: 60000, storage });
+  const jobId = 'mismatched-job';
+
+  // Start workflow1
+  await expect(runner.run(workflow1, {}, { jobId })).rejects.toThrow(TestSystemShutdownException);
+
+  // Try to resume with workflow2 - should fail
+  await expect(runner.run(workflow2, {}, { jobId }))
+    .rejects.toThrow('Job mismatched-job exists for workflow "workflow-one" but trying to run "workflow-two"');
+});
+
+test('durable execution: validates workflow version on resume', async () => {
+  const workflowV1 = WfBuilder
+    .create({ name: 'versioned-workflow', version: 1 })
+    .step(async () => {
+      throw new TestSystemShutdownException();
+    });
+
+  const workflowV2 = WfBuilder
+    .create({ name: 'versioned-workflow', version: 2 })
+    .step(async () => ({ done: true }));
+
+  const storage = new MemoryStorage();
+  
+  // Start with v1
+  const runner1 = new WfRunner({ workflows: [workflowV1], lockTimeoutMs: 60000, storage });
+  const jobId = 'version-mismatch-job';
+  await expect(runner1.run(workflowV1, {}, { jobId })).rejects.toThrow(TestSystemShutdownException);
+
+  // Try to resume with v2 - should fail
+  const runner2 = new WfRunner({ workflows: [workflowV2], lockTimeoutMs: 60000, storage });
+  await expect(runner2.run(workflowV2, {}, { jobId }))
+    .rejects.toThrow('Job version-mismatch-job has version 1 but workflow has version 2');
 });

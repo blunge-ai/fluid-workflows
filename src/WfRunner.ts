@@ -3,13 +3,23 @@ import type { WfArray, NamesOfWfs, MatchingWorkflow } from './typeHelpers';
 import type { Workflow } from './types';
 import { WfBuilder, findWorkflow, isRestartWrapper, isCompleteWrapper, withRestartWrapper, withCompleteWrapper, collectWorkflows, isStepsChildren } from './WfBuilder';
 import type { StepFn } from './types';
-import type { JobStatus } from './jobQueue/JobQueueEngine';
 import { makeWorkflowJobData, WfJobData, WfProgressInfo } from './types';
 import { defaultLogger } from './utils';
 import type { Logger } from './utils';
 import { JobResult } from './jobQueue/JobQueueEngine';
 import type { Storage } from './storage/Storage';
 import { MemoryStorage } from './storage/MemoryStorage';
+
+/**
+ * Special exception that causes the runner to abort without marking the job as failed.
+ * Used for testing durable execution resume and for graceful shutdown scenarios.
+ */
+export class TestSystemShutdownException extends Error {
+  constructor(message?: string) {
+    super(message ?? 'System shutdown');
+    this.name = 'TestSystemShutdownException';
+  }
+}
 
 type RunOptions<Meta> = {
   jobId?: string,
@@ -49,28 +59,23 @@ export class WfRunner<
     const childJobId = `${parentJobId}:step:${stepIndex}:child:${childKey}`;
     const foundWorkflow = findWorkflow(this.allWorkflows, childWorkflow);
     
-    // Run child workflow recursively using the internal implementation
-    return this.runInternal(foundWorkflow as Workflow<unknown, ChildOutput>, input, { jobId: childJobId, meta });
+    // Run child workflow - will resume from storage if job exists
+    return this.runJob(foundWorkflow as Workflow<unknown, ChildOutput>, input, { jobId: childJobId, meta });
   }
 
-  private async runInternal<Input, Output, Meta>(
+  private async runSteps<Input, Output, Meta>(
     workflow: Workflow<Input, Output>,
-    input: Input,
-    opts?: RunOptions<Meta>,
+    jobId: string,
+    jobData: WfJobData<Input>,
+    opts?: { meta?: Meta },
   ): Promise<Output> {
-    const jobId = opts?.jobId ?? `${workflow.name}-${uuidv4()}`;
+    let currentStep = jobData.currentStep;
+    let result: unknown = jobData.input;
 
-    let result: unknown = input;
-    if (workflow.inputSchema) {
+    // Only parse input schema at step 0
+    if (currentStep === 0 && workflow.inputSchema) {
       result = workflow.inputSchema.parse(result);
     }
-
-    const jobData = makeWorkflowJobData<Input>({ props: workflow, input }) as WfJobData<unknown>;
-    await this.storage.updateState(jobId, { state: jobData, ttlMs: this.lockTimeoutMs });
-
-    this.logger.info({ name: workflow.name, version: workflow.version, meta: opts?.meta, jobId }, 'starting workflow');
-
-    let currentStep = 0;
 
     const runOptions = {
       progress: async (progressInfo: WfProgressInfo) => {
@@ -192,6 +197,11 @@ export class WfRunner<
       await this.storage.setResult(jobId, { type: 'success', output } as JobResult<Output>, status);
       return output;
     } catch (err) {
+      // TestSystemShutdownException aborts without marking job as failed (for durable execution testing)
+      if (err instanceof TestSystemShutdownException) {
+        this.logger.info({ name: workflow.name, version: workflow.version, meta: opts?.meta, jobId }, 'workflow aborted for shutdown');
+        throw err;
+      }
       const reason = `exception when running workflow: ${String(err)}`;
       this.logger.error({ name: workflow.name, version: workflow.version, meta: opts?.meta, jobId, reason, err }, 'workflow error');
       const status = { type: 'error', jobId, meta: opts?.meta as Meta, reason } as const;
@@ -200,12 +210,89 @@ export class WfRunner<
     }
   }
 
+  private async runJob<Input, Output, Meta>(
+    workflow: Workflow<Input, Output>,
+    input: Input,
+    opts?: RunOptions<Meta>,
+  ): Promise<Output> {
+    const jobId = opts?.jobId ?? `${workflow.name}-${uuidv4()}`;
+
+    // Check if there's an existing job in progress
+    const existingState = await this.storage.getState<WfJobData<Input>>(jobId);
+    
+    if (existingState) {
+      // Validate the existing job matches the workflow
+      const jobData = existingState.state;
+      if (jobData.name !== workflow.name) {
+        throw new Error(`Job ${jobId} exists for workflow "${jobData.name}" but trying to run "${workflow.name}"`);
+      }
+      if (jobData.version !== workflow.version) {
+        throw new Error(`Job ${jobId} has version ${jobData.version} but workflow has version ${workflow.version}`);
+      }
+      
+      this.logger.info({ 
+        name: workflow.name, 
+        version: workflow.version, 
+        meta: opts?.meta, 
+        jobId,
+        currentStep: jobData.currentStep,
+        totalSteps: jobData.totalSteps,
+      }, 'resuming workflow');
+      
+      return this.runSteps(workflow, jobId, jobData, { meta: opts?.meta });
+    }
+
+    // Create new job
+    const jobData = makeWorkflowJobData<Input>({ props: workflow, input }) as WfJobData<Input>;
+    await this.storage.updateState(jobId, { state: jobData, ttlMs: this.lockTimeoutMs });
+
+    this.logger.info({ name: workflow.name, version: workflow.version, meta: opts?.meta, jobId }, 'starting workflow');
+
+    return this.runSteps(workflow, jobId, jobData, { meta: opts?.meta });
+  }
+
   async run<const N extends string, Input, Output, No, Co, Meta = unknown>(
     props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, NamesOfWfs<Wfs>, Input, Output, No, Co>,
     input: Input,
     opts?: RunOptions<Meta>,
   ) {
     const workflow = findWorkflow(this.allWorkflows, props) as Workflow<Input, Output>;
-    return this.runInternal(workflow, input, opts);
+    return this.runJob(workflow, input, opts);
+  }
+
+  /**
+   * Resume a workflow from its persisted state.
+   * Looks up the job by jobId, finds the matching workflow, and continues execution.
+   * @throws Error if job not found or workflow not registered
+   */
+  async resume<Output, Meta = unknown>(
+    jobId: string,
+    opts?: { meta?: Meta },
+  ): Promise<Output> {
+    const existingState = await this.storage.getState<WfJobData<unknown>>(jobId);
+    
+    if (!existingState) {
+      throw new Error(`No active job found with id: ${jobId}`);
+    }
+
+    const jobData = existingState.state;
+    const workflow = this.allWorkflows.find(
+      w => w.name === jobData.name && w.version === jobData.version
+    );
+
+    if (!workflow) {
+      throw new Error(`No registered workflow found for "${jobData.name}" version ${jobData.version}`);
+    }
+
+    this.logger.info({ 
+      name: workflow.name, 
+      version: workflow.version, 
+      meta: opts?.meta, 
+      jobId,
+      currentStep: jobData.currentStep,
+      totalSteps: jobData.totalSteps,
+    }, 'resuming workflow');
+
+    return this.runSteps(workflow, jobId, jobData, { meta: opts?.meta }) as Promise<Output>;
   }
 }

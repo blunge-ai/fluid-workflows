@@ -24,7 +24,7 @@ export {
 export type { JobQueueWorkflowDispatcherInterface } from './jobQueue/JobQueueWorkflowDispatcher';
 export { Config } from './Config';
 export { BullMqAdapter } from './jobQueue/BullMqAdapter';
-export { WfRunner } from './WfRunner';
+export { WfRunner, TestSystemShutdownException } from './WfRunner';
 export type { Storage } from './storage/Storage';
 export { RedisStorage } from './storage/RedisStorage';
 export { MemoryStorage } from './storage/MemoryStorage';
