@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Workflow, findWorkflow } from '../WfBuilder';
-import { makeWorkflowJobData } from '../WorkflowJob';
+import { makeWorkflowJobData } from '../types';
 import type { JobResultStatus } from './JobQueueEngine';
 import { isResultStatus } from './JobQueueEngine';
 import { Logger, assert } from '../utils';

@@ -1,6 +1,34 @@
 import type { ZodTypeAny } from 'zod';
 import type { MatchingWorkflow, NamesOfWfs, WfArray } from './typeHelpers';
-import type { WorkflowProgressInfo } from './WorkflowJob';
+
+// ============================================================================
+// Workflow Job Types
+// ============================================================================
+
+// The job data (or state) used by the JobQueueWorkflowRunner to run a workflow
+
+export type WfJobData<Input = unknown> = {
+  name: string,
+  version: number,
+  totalSteps: number,
+  currentStep: number,
+  input: Input,
+};
+
+export type WfProgressInfo = {
+  phase: string,
+  progress: number,
+};
+
+export function makeWorkflowJobData<Input = unknown>({ props, input }: { props: WorkflowProps, input: Input }) {
+  return {
+    name: props.name,
+    version: props.version,
+    totalSteps: props.numSteps,
+    currentStep: 0,
+    input: input,
+  } satisfies WfJobData<Input>;
+}
 
 // ============================================================================
 // Workflow Types
@@ -20,9 +48,9 @@ export type WorkflowRunOptions<WfInput, WfOutput, StepInput> = {
 };
 
 export type ProgressFn
-  = (progressInfo: WorkflowProgressInfo) => Promise<{ interrupt: boolean }>;
+  = (progressInfo: WfProgressInfo) => Promise<{ interrupt: boolean }>;
 export type UpdateFn<StepInput>
-  = (stepInput: StepInput, progressInfo?: WorkflowProgressInfo) => Promise<{ interrupt: boolean }>;
+  = (stepInput: StepInput, progressInfo?: WfProgressInfo) => Promise<{ interrupt: boolean }>;
 export type StepFn<Input, Output, WfInput, WfOutput>
   = (input: Input, runOpts: WorkflowRunOptions<WfInput, WfOutput, Input>) => Promise<Output>;
 

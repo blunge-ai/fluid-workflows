@@ -3,7 +3,7 @@ import type { Workflow, WorkflowRunOptions, StepFn } from '../types';
 import { WfBuilder, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper, isCompleteWrapper, withCompleteWrapper, isStepsChildren } from '../WfBuilder';
 import type { JobData, JobResult, JobStatusType } from './JobQueueEngine';
 import { timeout, assertNever, assert } from '../utils';
-import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from '../WorkflowJob';
+import { makeWorkflowJobData, WfJobData, WfProgressInfo } from '../types';
 import { WfArray, NamesOfWfs, ValueOf } from '../typeHelpers';
 import { Config } from '../Config';
 
@@ -15,14 +15,14 @@ export class JobQueueWorkflowRunner<
 
   async runSteps<Input, Output>(
     workflow: Workflow<Input, Output>,
-    job: JobData<WorkflowJobData<Input>>,
+    job: JobData<WfJobData<Input>>,
     queue: string,
     token: string,
     childResults?: Record<string, JobResult<unknown>>,
   ): Promise<{ status: Extract<JobStatusType, 'suspended' | 'success'>, output?: Output }>{
 
     const runOptions: WorkflowRunOptions<Input, Output, unknown> = {
-      progress: async (progressInfo: WorkflowProgressInfo) => {
+      progress: async (progressInfo: WfProgressInfo) => {
         this.config.logger.info({
           workflowName: workflow.name,
           workflowVersion: workflow.version,
@@ -32,8 +32,8 @@ export class JobQueueWorkflowRunner<
         }, 'workflow runner: progress');
         return await this.config.engine.updateJob({ queue, token, jobId: job.id, progressInfo })
       },
-      update: async (stepInput: unknown, progressInfo?: WorkflowProgressInfo) => {
-        const input = { ...job.input, input: stepInput as any, currentStep } satisfies WorkflowJobData<Input>;
+      update: async (stepInput: unknown, progressInfo?: WfProgressInfo) => {
+        const input = { ...job.input, input: stepInput as any, currentStep } satisfies WfJobData<Input>;
         return await this.config.engine.updateJob({ queue, token, jobId: job.id, input, progressInfo });
       },
       restart: withRestartWrapper,
@@ -194,7 +194,7 @@ export class JobQueueWorkflowRunner<
     return { status: 'success', output };
   }
 
-  async runJob<Input, Output>(job: JobData<WorkflowJobData<Input>, unknown>, { childResults, queue, token }: { childResults?: Record<string, JobResult<unknown>>, queue: string, token: string }): Promise<{ status: Extract<JobStatusType, 'suspended' | 'success' | 'error'>, output?: Output }> {
+  async runJob<Input, Output>(job: JobData<WfJobData<Input>, unknown>, { childResults, queue, token }: { childResults?: Record<string, JobResult<unknown>>, queue: string, token: string }): Promise<{ status: Extract<JobStatusType, 'suspended' | 'success' | 'error'>, output?: Output }> {
     const jobId = job.id;
     try {
       const workflow = findWorkflow(this.config.allWorkflows, job.input);
@@ -230,7 +230,7 @@ export class JobQueueWorkflowRunner<
       this.config.logger.info({ queue }, 'workflow runner: started');
       while (!stop) {
         try {
-          const { data: job, childResults } = await this.config.engine.acquireJob<WorkflowJobData, unknown, unknown>({ queue, token, block: true });
+          const { data: job, childResults } = await this.config.engine.acquireJob<WfJobData, unknown, unknown>({ queue, token, block: true });
           if (job) {
             await this.runJob(job, { childResults, queue, token });
           }

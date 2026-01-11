@@ -4,7 +4,7 @@ import type { Workflow } from './types';
 import { WfBuilder, findWorkflow, isRestartWrapper, isCompleteWrapper, withRestartWrapper, withCompleteWrapper, collectWorkflows, isStepsChildren } from './WfBuilder';
 import type { StepFn } from './types';
 import type { JobStatus } from './jobQueue/JobQueueEngine';
-import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
+import { makeWorkflowJobData, WfJobData, WfProgressInfo } from './types';
 import { defaultLogger } from './utils';
 import type { Logger } from './utils';
 import { JobResult } from './jobQueue/JobQueueEngine';
@@ -65,7 +65,7 @@ export class WfRunner<
       result = workflow.inputSchema.parse(result);
     }
 
-    const jobData = makeWorkflowJobData<Input>({ props: workflow, input }) as WorkflowJobData<unknown>;
+    const jobData = makeWorkflowJobData<Input>({ props: workflow, input }) as WfJobData<unknown>;
     await this.storage.updateState(jobId, { state: jobData, ttlMs: this.lockTimeoutMs });
 
     this.logger.info({ name: workflow.name, version: workflow.version, meta: opts?.meta, jobId }, 'starting workflow');
@@ -73,12 +73,12 @@ export class WfRunner<
     let currentStep = 0;
 
     const runOptions = {
-      progress: async (progressInfo: WorkflowProgressInfo) => {
+      progress: async (progressInfo: WfProgressInfo) => {
         const status = { type: 'active', jobId, meta: opts?.meta as Meta, info: progressInfo } as const;
         await this.storage.updateState(jobId, { status, ttlMs: this.lockTimeoutMs });
         return { interrupt: false } as const;
       },
-      update: async (stepInput: unknown, progressInfo?: WorkflowProgressInfo) => {
+      update: async (stepInput: unknown, progressInfo?: WfProgressInfo) => {
         const status = (
           progressInfo
             ? { type: 'active', jobId, meta: opts?.meta as Meta, info: progressInfo } as const
