@@ -64,6 +64,7 @@ export type ParallelMap<Input, WfInput, WfOutput>
  */
 export interface Workflow<Input = unknown, Output = unknown, Names extends string = string, NextOutput = unknown, CtrlOutput = unknown> extends WorkflowProps<Names> {
   inputSchema?: ZodTypeAny;
+  outputSchema?: ZodTypeAny;
   stepFns: Array<
     StepFn<unknown, unknown, unknown, unknown> |
     Workflow<unknown, unknown, string, any, any> |

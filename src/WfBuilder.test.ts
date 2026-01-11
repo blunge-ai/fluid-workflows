@@ -164,3 +164,40 @@ test('.parallel() with mixed workflows and functions', async () => {
   // y = 6, fromWf.z = 3 + 6 = 9, fromFn = 3 * 6 = 18, result = 27
   expect(result.result).toBe(27);
 });
+
+test('zod output schema', async () => {
+  const inputSchema = z.object({ a: z.number(), b: z.number() });
+  const outputSchema = z.object({ sum: z.number() });
+
+  const workflow = WfBuilder
+    .create({ name: 'sum-with-output-schema', version: 1, inputSchema, outputSchema })
+    .step(async ({ a, b }) => {
+      return { sum: a + b };
+    });
+
+  expect(workflow.inputSchema).toBe(inputSchema);
+  expect(workflow.outputSchema).toBe(outputSchema);
+
+  const result = await workflow.run({ a: 2, b: 3 });
+  expect(result.sum).toBe(5);
+});
+
+test('output schema is preserved through step and parallel', async () => {
+  const inputSchema = z.object({ x: z.number() });
+  const outputSchema = z.object({ result: z.number() });
+
+  const workflow = WfBuilder
+    .create({ name: 'schema-preserved', version: 1, inputSchema, outputSchema })
+    .step(async ({ x }) => ({ y: x * 2 }))
+    .parallel({
+      a: async ({ x, y }) => x + y,
+      b: async ({ x, y }) => x * y,
+    })
+    .step(async ({ a, b }) => ({ result: a + b }));
+
+  expect(workflow.inputSchema).toBe(inputSchema);
+  expect(workflow.outputSchema).toBe(outputSchema);
+
+  const result = await workflow.run({ x: 3 });
+  expect(result.result).toBe(27);
+});

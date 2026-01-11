@@ -47,6 +47,7 @@ export class WfBuilder<Input = Unset, Output = never, const Names extends string
   public version: number;
   public numSteps: number;
   public inputSchema?: ZodTypeAny;
+  public outputSchema?: ZodTypeAny;
   private _runner?: Runner;
 
   constructor(
@@ -58,6 +59,7 @@ export class WfBuilder<Input = Unset, Output = never, const Names extends string
       StepsChildren<any>
     >,
     inputSchema?: ZodTypeAny,
+    outputSchema?: ZodTypeAny,
     runner?: Runner,
   ) {
     this.name = props.name;
@@ -65,14 +67,16 @@ export class WfBuilder<Input = Unset, Output = never, const Names extends string
 
     this.numSteps = stepFns.length;
     this.inputSchema = inputSchema;
+    this.outputSchema = outputSchema;
     this._runner = runner;
   }
 
   static create<const Name extends string>(props: { name: Name, version: number, runner?: Runner }): WfBuilder<Unset, Unset, Name>;
   static create<const Name extends string, S extends ZodTypeAny>(props: { name: Name, version: number, inputSchema: S, runner?: Runner }): WfBuilder<z.input<S>, Unset, Name>;
-  static create<const Name extends string, S extends ZodTypeAny>(props: { name: Name, version: number, inputSchema?: S, runner?: Runner }): WfBuilder<Unset | z.input<S>, Unset, Name> {
+  static create<const Name extends string, S extends ZodTypeAny, O extends ZodTypeAny>(props: { name: Name, version: number, inputSchema: S, outputSchema: O, runner?: Runner }): WfBuilder<z.input<S>, Unset, Name>;
+  static create<const Name extends string, S extends ZodTypeAny, O extends ZodTypeAny>(props: { name: Name, version: number, inputSchema?: S, outputSchema?: O, runner?: Runner }): WfBuilder<Unset | z.input<S>, Unset, Name> {
     const { name, version, runner } = props;
-    return new WfBuilder<unknown, unknown, Name>({ name, version }, [], props.inputSchema, runner) as unknown as WfBuilder<Unset | z.input<S>, Unset, Name>;
+    return new WfBuilder<unknown, unknown, Name>({ name, version }, [], props.inputSchema, props.outputSchema, runner) as unknown as WfBuilder<Unset | z.input<S>, Unset, Name>;
   }
 
   private async getRunner(): Promise<Runner> {
@@ -137,6 +141,7 @@ export class WfBuilder<Input = Unset, Output = never, const Names extends string
       { name: this.name, version: this.version },
       [ ...this.stepFns, stepFnOrChild ],
       this.inputSchema,
+      this.outputSchema,
       this._runner,
     );
   }
@@ -149,6 +154,7 @@ export class WfBuilder<Input = Unset, Output = never, const Names extends string
       { name: this.name, version: this.version },
       [ ...this.stepFns, new StepsChildren(childrenMap) ],
       this.inputSchema,
+      this.outputSchema,
       this._runner,
     );
   }
