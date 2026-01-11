@@ -24,7 +24,10 @@ export {
 export type { JobQueueWorkflowDispatcherInterface } from './jobQueue/JobQueueWorkflowDispatcher';
 export { Config } from './Config';
 export { BullMqAdapter } from './jobQueue/BullMqAdapter';
-export { InProcessWorkflowRunner } from './InProcessWorkflowRunner';
+export { WorkflowRunner } from './WorkflowRunner';
+export type { Storage } from './Storage';
+export { RedisStorage } from './RedisStorage';
+export { MemoryStorage } from './MemoryStorage';
 export { InMemoryJobQueueAdapter } from './jobQueue/InMemoryJobQueueAdapter';
 export { HttpJobQueueEngineClient } from './jobQueue/HttpJobQueueEngineClient';
 export { HttpJobQueueEngineServer } from './jobQueue/HttpJobQueueEngineServer';

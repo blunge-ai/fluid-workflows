@@ -1,8 +1,7 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
 import { Workflow } from '~/Workflow';
-import { InProcessWorkflowRunner } from '~/index';
-
+import { WorkflowRunner } from '~/index';
 test('run step', async () => {
   const workflow = Workflow
     .create({ name: 'add-a-and-b', version: 1 })
@@ -10,7 +9,7 @@ test('run step', async () => {
       return { c: a + b };
     });
 
-  const runner = new InProcessWorkflowRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
+  const runner = new WorkflowRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
   const result = await runner.run(workflow, { a: 12, b: 34 });
   expect(result.c).toBe(46);
 });
@@ -30,7 +29,7 @@ test('complete finishes the workflow early', async () => {
       return { sum: 9999 };
     });
 
-  const runner = new InProcessWorkflowRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
+  const runner = new WorkflowRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
   const result = await runner.run(workflow, { a: 2, b: 3 });
   expect(result.sum).toBe(5);
 });
@@ -50,7 +49,7 @@ test('restart restarts from the beginning', async () => {
       return { out: after };
     });
 
-  const runner = new InProcessWorkflowRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
+  const runner = new WorkflowRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
   const result = await runner.run(workflow, { iterations: 3, value: 10 });
   expect(result.out).toBe(13);
 });

@@ -3,23 +3,22 @@ import type { WfArray, NamesOfWfs, MatchingWorkflow } from './typeHelpers';
 import { Workflow, findWorkflow, isRestartWrapper, isCompleteWrapper, withRestartWrapper, withCompleteWrapper, collectWorkflows } from './Workflow';
 import type { JobStatus } from './jobQueue/JobQueueEngine';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
-import { defaultRedisConnection, defaultLogger } from './utils';
+import { defaultLogger } from './utils';
 import type { Logger } from './utils';
-import { pack, unpack } from './packer';
 import { JobResult } from './jobQueue/JobQueueEngine';
-import Redis from 'ioredis';
+import type { Storage } from './Storage';
+import { MemoryStorage } from './MemoryStorage';
 
 type RunOptions<Meta> = {
   jobId?: string,
   meta?: Meta,
-  statusHandler?: (status: JobStatus<Meta, WorkflowProgressInfo>) => void
 };
 
-export class InProcessWorkflowRunner<
+export class WorkflowRunner<
   const Names extends NamesOfWfs<Wfs>,
   const Wfs extends WfArray<Names>,
 > {
-  private readonly redis;
+  private readonly storage: Storage;
   private readonly allWorkflows: Workflow<unknown, unknown>[];
   private readonly logger: Logger;  
   private readonly lockTimeoutMs: number;
@@ -29,35 +28,13 @@ export class InProcessWorkflowRunner<
       workflows: Wfs,
       lockTimeoutMs: number,
       logger?: Logger,
-      redisConnection?: () => Redis,
+      storage?: Storage,
     }
   ) {
-    this.redis = (opts.redisConnection ?? defaultRedisConnection)(); 
+    this.storage = opts.storage ?? new MemoryStorage();
     this.logger = opts.logger ?? defaultLogger;
     this.allWorkflows = collectWorkflows(opts.workflows as unknown as Workflow<unknown, unknown>[]);
     this.lockTimeoutMs = opts.lockTimeoutMs;
-  }
-
-  private async publishStatus<Meta>(jobId: string, status: JobStatus<Meta, WorkflowProgressInfo>, opts?: RunOptions<Meta>) {
-    opts?.statusHandler?.(status);
-    await this.redis.publish(`jobs:status:${jobId}`, pack(status));
-  }
-
-  private async updateState<Meta>(jobId: string, state: WorkflowJobData<unknown>, status?: JobStatus<Meta, WorkflowProgressInfo>, opts?: RunOptions<Meta>) {
-    const currentState = await this.redis.setBuffer(`jobs:state:${jobId}`, pack(state), 'PX', this.lockTimeoutMs, 'GET');
-    if (currentState) {
-      
-    }
-    if (status) {
-      await this.publishStatus(jobId, status, opts)
-    }
-  }
-
-  private async handleResult<Output, Meta>(jobId: string, result: JobResult<Output>, status?: JobStatus<Meta, WorkflowProgressInfo>, opts?: RunOptions<Meta>) {
-    await this.redis.set(`jobs:result:${jobId}`, pack(result));
-    if (status) {
-      await this.publishStatus(jobId, status, opts);
-    }
   }
 
   async run<const N extends string, Input, Output, No, Co, Meta = unknown>(
@@ -75,7 +52,7 @@ export class InProcessWorkflowRunner<
     }
 
     const jobData = makeWorkflowJobData<Input>({ props: workflow, input }) as WorkflowJobData<unknown>;
-    await this.updateState(jobId, jobData, undefined, opts);
+    await this.storage.updateState(jobId, { state: jobData, ttlMs: this.lockTimeoutMs });
 
     this.logger.info({ name: props.name, version: props.version, meta: opts?.meta, jobId }, 'starting workflow');
 
@@ -84,7 +61,7 @@ export class InProcessWorkflowRunner<
     const runOptions = {
       progress: async (progressInfo: WorkflowProgressInfo) => {
         const status = { type: 'active', jobId, meta: opts?.meta as Meta, info: progressInfo } as const;
-        await this.publishStatus(jobId, status, opts);
+        await this.storage.updateState(jobId, { status, ttlMs: this.lockTimeoutMs });
         return { interrupt: false } as const;
       },
       update: async (stepInput: unknown, progressInfo?: WorkflowProgressInfo) => {
@@ -93,7 +70,11 @@ export class InProcessWorkflowRunner<
             ? { type: 'active', jobId, meta: opts?.meta as Meta, info: progressInfo } as const
             : undefined
         );
-        await this.updateState(jobId, { ...jobData, input: stepInput, currentStep }, status, opts);
+        await this.storage.updateState(jobId, {
+          state: { ...jobData, input: stepInput, currentStep },
+          status,
+          ttlMs: this.lockTimeoutMs,
+        });
         return { interrupt: false } as const;
       },
       restart: withRestartWrapper,
@@ -113,13 +94,16 @@ export class InProcessWorkflowRunner<
             result = workflow.inputSchema.parse(result);
           }
           currentStep = 0;
-          await this.updateState(jobId, { ...jobData, input: result, currentStep }, undefined, opts);
+          await this.storage.updateState(jobId, {
+            state: { ...jobData, input: result, currentStep },
+            ttlMs: this.lockTimeoutMs,
+          });
           continue;
         }
         if (isCompleteWrapper(out)) {
           const output = (out as any).output as Output;
           const status = { type: 'success', jobId, meta: opts?.meta as Meta, resultKey: jobId } as const;
-          await this.handleResult(jobId, { type: 'success', output }, status, opts);
+          await this.storage.setResult(jobId, { type: 'success', output } as JobResult<Output>, status);
           return output;
         }
         // Last step's output is the workflow output (no merge)
@@ -132,20 +116,23 @@ export class InProcessWorkflowRunner<
 
         currentStep += 1;
         if (currentStep !== workflow.stepFns.length) {
-          await this.updateState(jobId, { ...jobData, input: result, currentStep }, undefined, opts);
+          await this.storage.updateState(jobId, {
+            state: { ...jobData, input: result, currentStep },
+            ttlMs: this.lockTimeoutMs,
+          });
         }
       }
 
       this.logger.info({ name: props.name, version: props.version, meta: opts?.meta, jobId }, 'finished workflow');
       const output = result as Output;
       const status = { type: 'success', jobId, meta: opts?.meta as Meta, resultKey: jobId } as const;
-      this.handleResult(jobId, { type: 'success', output }, status, opts)
+      await this.storage.setResult(jobId, { type: 'success', output } as JobResult<Output>, status);
       return output;
     } catch (err) {
       const reason = `exception when running workflow: ${String(err)}`;
       this.logger.error({ name: props.name, version: props.version, meta: opts?.meta, jobId, reason, err }, 'workflow error');
       const status = { type: 'error', jobId, meta: opts?.meta as Meta, reason } as const;
-      await this.handleResult(jobId, { type: 'error', reason }, status, opts);
+      await this.storage.setResult(jobId, { type: 'error', reason } as JobResult<Output>, status);
       throw err;
     }
   }
