@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { WfArray, NamesOfWfs, MatchingWorkflow } from './typeHelpers';
-import type { Workflow } from './types';
+import type { Workflow, WfDispatcher, DispatchOptions } from './types';
 import { WfBuilder, findWorkflow, isRestartWrapper, isCompleteWrapper, withRestartWrapper, withCompleteWrapper, collectWorkflows, isStepsChildren } from './WfBuilder';
 import type { StepFn } from './types';
 import { makeWorkflowJobData, WfJobData, WfProgressInfo } from './types';
@@ -11,13 +11,14 @@ import type { Storage } from './storage/Storage';
 import { MemoryStorage } from './storage/MemoryStorage';
 
 /**
- * Special exception that causes the runner to abort without marking the job as failed.
- * Used for testing durable execution resume and for graceful shutdown scenarios.
+ * Exception that causes the runner to abort without marking the job as failed.
+ * Used for suspending workflow execution (e.g., waiting for child workflows,
+ * graceful shutdown, or testing durable execution resume).
  */
-export class TestSystemShutdownException extends Error {
+export class SuspendExecutionException extends Error {
   constructor(message?: string) {
-    super(message ?? 'System shutdown');
-    this.name = 'TestSystemShutdownException';
+    super(message ?? 'Workflow suspended');
+    this.name = 'SuspendExecutionException';
   }
 }
 
@@ -33,6 +34,7 @@ export class WfRunner<
   private readonly allWorkflows: Workflow<unknown, unknown>[];
   private readonly logger: Logger;  
   private readonly lockTimeoutMs: number;
+  private readonly dispatcher?: WfDispatcher<Wfs>;
 
   constructor(
     opts: {
@@ -40,27 +42,51 @@ export class WfRunner<
       lockTimeoutMs: number,
       logger?: Logger,
       storage?: Storage,
+      dispatcher?: WfDispatcher<Wfs>,
     }
   ) {
     this.storage = opts.storage ?? new MemoryStorage();
     this.logger = opts.logger ?? defaultLogger;
     this.allWorkflows = collectWorkflows(opts.workflows as unknown as Workflow<unknown, unknown>[]);
     this.lockTimeoutMs = opts.lockTimeoutMs;
+    this.dispatcher = opts.dispatcher;
   }
 
-  private async runChild<ChildOutput>(
-    childWorkflow: Workflow<unknown, ChildOutput>,
+  /**
+   * Dispatch child workflows. Uses custom dispatcher if provided, otherwise runs inline.
+   */
+  private async dispatch(
+    workflows: Record<string, Workflow<unknown, unknown>>,
     input: unknown,
     parentJobId: string,
     stepIndex: number,
-    childKey: string,
     meta?: unknown,
-  ): Promise<ChildOutput> {
-    const childJobId = `${parentJobId}:step:${stepIndex}:child:${childKey}`;
-    const foundWorkflow = findWorkflow(this.allWorkflows, childWorkflow);
+  ): Promise<Record<string, unknown>> {
+    const entries = Object.entries(workflows);
     
-    // Run child workflow - will resume from storage if job exists
-    return this.runJob(foundWorkflow as Workflow<unknown, ChildOutput>, input, { jobId: childJobId, meta });
+    if (this.dispatcher) {
+      // Dispatch all in parallel via dispatcher
+      const results = await Promise.all(entries.map(async ([key, workflow]) => {
+        const foundWorkflow = findWorkflow(this.allWorkflows, workflow);
+        const childJobId = `${parentJobId}:step:${stepIndex}:child:${key}`;
+        const output = await this.dispatcher!.dispatchAwaitingOutput(
+          foundWorkflow as any,
+          input,
+          { jobId: childJobId, meta },
+        );
+        return [key, output] as const;
+      }));
+      return Object.fromEntries(results);
+    }
+    
+    // Default: run all inline in parallel
+    const results = await Promise.all(entries.map(async ([key, workflow]) => {
+      const foundWorkflow = findWorkflow(this.allWorkflows, workflow);
+      const childJobId = `${parentJobId}:step:${stepIndex}:child:${key}`;
+      const output = await this.runJob(foundWorkflow as Workflow<unknown, unknown>, input, { jobId: childJobId, meta });
+      return [key, output] as const;
+    }));
+    return Object.fromEntries(results);
   }
 
   private async runSteps<Input, Output, Meta>(
@@ -154,21 +180,20 @@ export class WfRunner<
             return [key, fnOut] as const;
           }));
 
-          // Run child workflows in parallel
-          const workflowOutputsPromise = Promise.all(workflowEntries.map(async ([key, childWorkflow]) => {
-            const childOut = await this.runChild(childWorkflow, result, jobId, currentStep, key, opts?.meta);
-            return [key, childOut] as const;
-          }));
+          // Run child workflows via dispatch (handles both inline and custom dispatcher)
+          const workflowsMap = Object.fromEntries(workflowEntries);
+          const workflowOutputsPromise = Object.keys(workflowsMap).length > 0
+            ? this.dispatch(workflowsMap, result, jobId, currentStep, opts?.meta)
+            : Promise.resolve({});
 
           const [fnOutputs, workflowOutputs] = await Promise.all([fnOutputsPromise, workflowOutputsPromise]);
           const fnOutputRecord = Object.fromEntries(fnOutputs);
-          const workflowOutputRecord = Object.fromEntries(workflowOutputs);
 
-          result = { ...(result as Record<string, unknown>), ...fnOutputRecord, ...workflowOutputRecord };
+          result = { ...(result as Record<string, unknown>), ...fnOutputRecord, ...(workflowOutputs as Record<string, unknown>) };
         } else {
           // Handle .step(workflow) - single child workflow
           const childWorkflow = step as unknown as Workflow<unknown, unknown>;
-          const childOut = await this.runChild(childWorkflow, result, jobId, currentStep, '', opts?.meta);
+          const childOut = (await this.dispatch({ '': childWorkflow }, result, jobId, currentStep, opts?.meta))[''];
 
           // Last step's output is the workflow output (no merge)
           if (currentStep === workflow.stepFns.length - 1) {
@@ -197,9 +222,9 @@ export class WfRunner<
       await this.storage.setResult(jobId, { type: 'success', output } as JobResult<Output>, status);
       return output;
     } catch (err) {
-      // TestSystemShutdownException aborts without marking job as failed (for durable execution testing)
-      if (err instanceof TestSystemShutdownException) {
-        this.logger.info({ name: workflow.name, version: workflow.version, meta: opts?.meta, jobId }, 'workflow aborted for shutdown');
+      // SuspendExecutionException aborts without marking job as failed
+      if (err instanceof SuspendExecutionException) {
+        this.logger.info({ name: workflow.name, version: workflow.version, meta: opts?.meta, jobId }, 'workflow suspended');
         throw err;
       }
       const reason = `exception when running workflow: ${String(err)}`;
@@ -261,21 +286,26 @@ export class WfRunner<
   }
 
   /**
-   * Resume a workflow from its persisted state.
-   * Looks up the job by jobId, finds the matching workflow, and continues execution.
-   * @throws Error if job not found or workflow not registered
+   * Resume a workflow from its persisted state or provided job data.
+   * If jobData is provided, uses it directly; otherwise looks up state from storage.
+   * @throws Error if job not found (when no jobData provided) or workflow not registered
    */
   async resume<Output, Meta = unknown>(
     jobId: string,
-    opts?: { meta?: Meta },
+    opts?: { meta?: Meta, jobData?: WfJobData<unknown> },
   ): Promise<Output> {
-    const existingState = await this.storage.getState<WfJobData<unknown>>(jobId);
+    let jobData: WfJobData<unknown>;
     
-    if (!existingState) {
-      throw new Error(`No active job found with id: ${jobId}`);
+    if (opts?.jobData) {
+      jobData = opts.jobData;
+    } else {
+      const existingState = await this.storage.getState<WfJobData<unknown>>(jobId);
+      if (!existingState) {
+        throw new Error(`No active job found with id: ${jobId}`);
+      }
+      jobData = existingState.state;
     }
 
-    const jobData = existingState.state;
     const workflow = this.allWorkflows.find(
       w => w.name === jobData.name && w.version === jobData.version
     );
@@ -284,14 +314,23 @@ export class WfRunner<
       throw new Error(`No registered workflow found for "${jobData.name}" version ${jobData.version}`);
     }
 
-    this.logger.info({ 
-      name: workflow.name, 
-      version: workflow.version, 
-      meta: opts?.meta, 
-      jobId,
-      currentStep: jobData.currentStep,
-      totalSteps: jobData.totalSteps,
-    }, 'resuming workflow');
+    if (jobData.currentStep > 0) {
+      this.logger.info({ 
+        name: workflow.name, 
+        version: workflow.version, 
+        meta: opts?.meta, 
+        jobId,
+        currentStep: jobData.currentStep,
+        totalSteps: jobData.totalSteps,
+      }, 'resuming workflow');
+    } else {
+      this.logger.info({ 
+        name: workflow.name, 
+        version: workflow.version, 
+        meta: opts?.meta, 
+        jobId,
+      }, 'starting workflow');
+    }
 
     return this.runSteps(workflow, jobId, jobData, { meta: opts?.meta }) as Promise<Output>;
   }

@@ -5,7 +5,7 @@ import type { MatchingWorkflow, NamesOfWfs, WfArray } from './typeHelpers';
 // Workflow Job Types
 // ============================================================================
 
-// The job data (or state) used by the JobQueueWorkflowRunner to run a workflow
+// The job data (or state) used by the WfJobQueueWorker to run a workflow
 
 export type WfJobData<Input = unknown> = {
   name: string,

@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
 import { WfBuilder } from '~/WfBuilder';
-import { WfRunner, TestSystemShutdownException } from '~/WfRunner';
+import { WfRunner, SuspendExecutionException } from '~/WfRunner';
 import { MemoryStorage } from '~/storage/MemoryStorage';
 
 test('run step', async () => {
@@ -126,7 +126,7 @@ test('durable execution: resume after shutdown', async () => {
       runCount++;
       // Throw shutdown exception only on the first run
       if (runCount === 1) {
-        throw new TestSystemShutdownException('Simulated shutdown');
+        throw new SuspendExecutionException('Simulated shutdown');
       }
       return { step2Result: step1Result + 10 };
     })
@@ -139,9 +139,9 @@ test('durable execution: resume after shutdown', async () => {
   const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 60000, storage });
   const jobId = 'test-durable-job-123';
 
-  // First run: should abort at step 2 with TestSystemShutdownException
+  // First run: should abort at step 2 with SuspendExecutionException
   await expect(runner.run(workflow, { value: 5 }, { jobId }))
-    .rejects.toThrow(TestSystemShutdownException);
+    .rejects.toThrow(SuspendExecutionException);
   
   // Get active jobs from storage - should find our interrupted job
   const activeJobs = await storage.getActiveJobs();
@@ -188,7 +188,7 @@ test('durable execution: validates workflow name on resume', async () => {
   const workflow1 = WfBuilder
     .create({ name: 'workflow-one', version: 1 })
     .step(async () => {
-      throw new TestSystemShutdownException();
+      throw new SuspendExecutionException();
     });
 
   const workflow2 = WfBuilder
@@ -200,7 +200,7 @@ test('durable execution: validates workflow name on resume', async () => {
   const jobId = 'mismatched-job';
 
   // Start workflow1
-  await expect(runner.run(workflow1, {}, { jobId })).rejects.toThrow(TestSystemShutdownException);
+  await expect(runner.run(workflow1, {}, { jobId })).rejects.toThrow(SuspendExecutionException);
 
   // Try to resume with workflow2 - should fail
   await expect(runner.run(workflow2, {}, { jobId }))
@@ -211,7 +211,7 @@ test('durable execution: validates workflow version on resume', async () => {
   const workflowV1 = WfBuilder
     .create({ name: 'versioned-workflow', version: 1 })
     .step(async () => {
-      throw new TestSystemShutdownException();
+      throw new SuspendExecutionException();
     });
 
   const workflowV2 = WfBuilder
@@ -223,7 +223,7 @@ test('durable execution: validates workflow version on resume', async () => {
   // Start with v1
   const runner1 = new WfRunner({ workflows: [workflowV1], lockTimeoutMs: 60000, storage });
   const jobId = 'version-mismatch-job';
-  await expect(runner1.run(workflowV1, {}, { jobId })).rejects.toThrow(TestSystemShutdownException);
+  await expect(runner1.run(workflowV1, {}, { jobId })).rejects.toThrow(SuspendExecutionException);
 
   // Try to resume with v2 - should fail
   const runner2 = new WfRunner({ workflows: [workflowV2], lockTimeoutMs: 60000, storage });

@@ -15,16 +15,14 @@ export {
   isRestartWrapper,
   isCompleteWrapper,
 } from './WfBuilder';
-export {
- JobQueueWorkflowRunner
-} from './jobQueue/JobQueueWorkflowRunner';
+export { WfJobQueueWorker } from './jobQueue/WfJobQueueWorker';
 export {
  JobQueueWorkflowDispatcher
 } from './jobQueue/JobQueueWorkflowDispatcher';
 export type { JobQueueWorkflowDispatcherInterface } from './jobQueue/JobQueueWorkflowDispatcher';
 export { Config } from './Config';
 export { BullMqAdapter } from './jobQueue/BullMqAdapter';
-export { WfRunner, TestSystemShutdownException } from './WfRunner';
+export { WfRunner, SuspendExecutionException } from './WfRunner';
 export type { Storage } from './storage/Storage';
 export { RedisStorage } from './storage/RedisStorage';
 export { MemoryStorage } from './storage/MemoryStorage';
@@ -34,7 +32,7 @@ export { HttpJobQueueEngineServer } from './jobQueue/HttpJobQueueEngineServer';
 export type { WfDispatcher, DispatchOptions, Runner, RunOptions } from './types';
 
 import { Config } from './Config';
-import { JobQueueWorkflowRunner } from './jobQueue/JobQueueWorkflowRunner';
+import { WfJobQueueWorker } from './jobQueue/WfJobQueueWorker';
 import { JobQueueWorkflowDispatcher } from './jobQueue/JobQueueWorkflowDispatcher';
 import { WfBuilder } from './WfBuilder';
 import type { JobQueueEngine } from './jobQueue/JobQueueEngine';
@@ -48,9 +46,9 @@ export function config<const Wfs extends WfArray<string>, const Qs extends Recor
   logger?: Logger,
 }) {
   const cfg = new Config<Wfs, Qs>(args);
-  const runner = new JobQueueWorkflowRunner(cfg);
+  const worker = new WfJobQueueWorker(cfg);
   const dispatcher = new JobQueueWorkflowDispatcher(cfg);
-  return { runner, dispatcher } as const;
+  return { worker, dispatcher } as const;
 }
 
 export const workflow: typeof WfBuilder.create = WfBuilder.create;

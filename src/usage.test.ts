@@ -19,7 +19,7 @@ test('job queues example', async () => {
     .step(child)
     .step(async ({ s2 }) => ({ out: s2 }));
 
-  const { runner, dispatcher } = fwf.config({
+  const { worker, dispatcher } = fwf.config({
     engine: new fwf.BullMqAdapter({
       attempts: 1,
       lockTimeoutMs: 8000,
@@ -29,7 +29,7 @@ test('job queues example', async () => {
     queues: { parent: 'parent-queue', child: 'child-queue' },
   });
 
-  const stop = runner.run('all');
+  const stop = worker.run('all');
 
   const result = await dispatcher.dispatchAwaitingOutput(parent, { n: 5 });
   await stop();

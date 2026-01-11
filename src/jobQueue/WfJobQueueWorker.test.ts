@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
 import { WfBuilder } from '~/WfBuilder';
-import { JobQueueWorkflowRunner } from '~/jobQueue/JobQueueWorkflowRunner';
+import { WfJobQueueWorker } from '~/jobQueue/WfJobQueueWorker';
 import { JobQueueWorkflowDispatcher } from '~/jobQueue/JobQueueWorkflowDispatcher';
 import { BullMqAdapter } from '~/jobQueue/BullMqAdapter';
 import { Config } from '~/Config';
@@ -28,9 +28,9 @@ test('run step', async () => {
     });
 
   const config = new Config({ engine, workflows: [workflow], queues: { 'add-a-and-b': queue } });
-  const runner = new JobQueueWorkflowRunner(config);
+  const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
-  const stop = runner.run('all');
+  const stop = worker.run('all');
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 12, b: 34 } as { a: number, b: number });
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();
@@ -58,9 +58,9 @@ test('run child workflow', async () => {
 
   const queues = { 'parent-workflow': queue, 'child-workflow': queue };
   const config2 = new Config({ engine, workflows: [workflow, child], queues });
-  const runner = new JobQueueWorkflowRunner(config2);
+  const worker = new WfJobQueueWorker(config2);
   const dispatcher = new JobQueueWorkflowDispatcher(config2);
-  const stop = runner.run('all');
+  const stop = worker.run('all');
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { parentInput: 'XX' });
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();
@@ -95,9 +95,9 @@ test('run parallel children', async () => {
 
   const queues = { 'parent-two-children': 'queue-a', child1: 'queue-b', child2: 'queue-c' } as const;
   const config = new Config({ engine, workflows: [parent], queues });
-  const runner = new JobQueueWorkflowRunner(config);
+  const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
-  const stop = runner.run(['queue-a', 'queue-b', 'queue-c']);
+  const stop = worker.run(['queue-a', 'queue-b', 'queue-c']);
   const result = await dispatcher.dispatchAwaitingOutput(parent, { n: 5 });
   await timeout(100);
   await stop();
@@ -105,7 +105,7 @@ test('run parallel children', async () => {
   expect(result.out).toBe('12-child2(n=5)');
 });
 
-test('restart restarts from the beginning in JobQueueWorkflowRunner', async () => {
+test('restart restarts from the beginning in WfJobQueueWorker', async () => {
   const { engine, queue } = setup();
 
   const schema = z.object({ iterations: z.number(), value: z.number() });
@@ -123,9 +123,9 @@ test('restart restarts from the beginning in JobQueueWorkflowRunner', async () =
     });
 
   const config = new Config({ engine, workflows: [workflow], queues: { 'restart-runner': queue } });
-  const runner = new JobQueueWorkflowRunner(config);
+  const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
-  const stop = runner.run('all');
+  const stop = worker.run('all');
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { iterations: 3, value: 10 });
   await new Promise(resolve => setTimeout(resolve, 100));
   await stop();
@@ -143,9 +143,9 @@ test('output schema validation', async () => {
     .step(async ({ a }) => ({ result: a * 2 }));
 
   const config = new Config({ engine, workflows: [workflow], queues: { 'output-schema-jq': queue } });
-  const runner = new JobQueueWorkflowRunner(config);
+  const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
-  const stop = runner.run('all');
+  const stop = worker.run('all');
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 5 });
   await timeout(100);
   await stop();
@@ -163,9 +163,9 @@ test('output schema validation rejects invalid output', async () => {
     .step(async ({ a }) => ({ result: 'not-a-number' as any }));
 
   const config = new Config({ engine, workflows: [workflow], queues: { 'output-invalid-jq': queue } });
-  const runner = new JobQueueWorkflowRunner(config);
+  const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
-  const stop = runner.run('all');
+  const stop = worker.run('all');
   await expect(dispatcher.dispatchAwaitingOutput(workflow, { a: 5 })).rejects.toThrow();
   await timeout(100);
   await stop();
@@ -183,9 +183,9 @@ test('output schema validation with complete()', async () => {
     .step(async () => ({ result: 9999 }));
 
   const config = new Config({ engine, workflows: [workflow], queues: { 'complete-schema-jq': queue } });
-  const runner = new JobQueueWorkflowRunner(config);
+  const worker = new WfJobQueueWorker(config);
   const dispatcher = new JobQueueWorkflowDispatcher(config);
-  const stop = runner.run('all');
+  const stop = worker.run('all');
   const result = await dispatcher.dispatchAwaitingOutput(workflow, { a: 5 });
   await timeout(100);
   await stop();
