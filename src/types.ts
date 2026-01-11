@@ -102,7 +102,7 @@ export type DispatchOptions<Meta> = {
   meta?: Meta,
 };
 
-export interface WorkflowDispatcher<
+export interface WfDispatcher<
   Wfs extends WfArray<string>
 > {
   dispatch<N extends string, Input, Output, No, Co, Meta = unknown>(

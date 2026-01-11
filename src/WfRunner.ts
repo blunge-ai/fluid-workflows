@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { WfArray, NamesOfWfs, MatchingWorkflow } from './typeHelpers';
 import type { Workflow } from './types';
-import { WorkflowBuilder, findWorkflow, isRestartWrapper, isCompleteWrapper, withRestartWrapper, withCompleteWrapper, collectWorkflows, isStepsChildren } from './WorkflowBuilder';
+import { WfBuilder, findWorkflow, isRestartWrapper, isCompleteWrapper, withRestartWrapper, withCompleteWrapper, collectWorkflows, isStepsChildren } from './WfBuilder';
 import type { StepFn } from './types';
 import type { JobStatus } from './jobQueue/JobQueueEngine';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from './WorkflowJob';
@@ -16,7 +16,7 @@ type RunOptions<Meta> = {
   meta?: Meta,
 };
 
-export class WorkflowRunner<
+export class WfRunner<
   const Wfs extends WfArray<string>,
 > {
   private readonly storage: Storage;
@@ -100,7 +100,7 @@ export class WorkflowRunner<
         const step = workflow.stepFns[currentStep];
         let out: unknown;
 
-        if (typeof step === 'function' && !(step instanceof WorkflowBuilder)) {
+        if (typeof step === 'function' && !(step instanceof WfBuilder)) {
           // Handle step function
           out = await (step as any)(result, runOptions);
           if (isRestartWrapper(out)) {
@@ -131,8 +131,8 @@ export class WorkflowRunner<
         } else if (isStepsChildren(step)) {
           // Handle .parallel() - run functions and child workflows in parallel
           const entries = Object.entries(step.children);
-          const workflowEntries = entries.filter(([_, item]) => item instanceof WorkflowBuilder) as [string, Workflow<unknown, unknown>][];
-          const fnEntries = entries.filter(([_, item]) => typeof item === 'function' && !(item instanceof WorkflowBuilder)) as [string, StepFn<unknown, unknown, Input, Output>][];
+          const workflowEntries = entries.filter(([_, item]) => item instanceof WfBuilder) as [string, Workflow<unknown, unknown>][];
+          const fnEntries = entries.filter(([_, item]) => typeof item === 'function' && !(item instanceof WfBuilder)) as [string, StepFn<unknown, unknown, Input, Output>][];
 
           // Run functions in parallel
           const fnOutputsPromise = Promise.all(fnEntries.map(async ([key, fn]) => {

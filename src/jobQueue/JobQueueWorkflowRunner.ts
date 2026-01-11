@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Workflow, WorkflowRunOptions, StepFn } from '../types';
-import { WorkflowBuilder, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper, isCompleteWrapper, withCompleteWrapper, isStepsChildren } from '../WorkflowBuilder';
+import { WfBuilder, findWorkflow, validateWorkflowSteps, isRestartWrapper, withRestartWrapper, isCompleteWrapper, withCompleteWrapper, isStepsChildren } from '../WfBuilder';
 import type { JobData, JobResult, JobStatusType } from './JobQueueEngine';
 import { timeout, assertNever, assert } from '../utils';
 import { makeWorkflowJobData, WorkflowJobData, WorkflowProgressInfo } from '../WorkflowJob';
@@ -49,7 +49,7 @@ export class JobQueueWorkflowRunner<
       }
 
       const step = workflow.stepFns[currentStep];
-      if (typeof step === 'function' && !(step instanceof WorkflowBuilder)) {
+      if (typeof step === 'function' && !(step instanceof WfBuilder)) {
         // handle step function
         if (childResults) {
           throw Error('encountered child results when running a step function');
@@ -75,7 +75,7 @@ export class JobQueueWorkflowRunner<
       } else if (isStepsChildren(step)) {
         // handle .parallel() - run functions inline, submit workflows as children
         const entries = Object.entries(step.children);
-        const workflowEntries = entries.filter(([_, item]) => item instanceof WorkflowBuilder) as [string, Workflow<unknown, unknown>][];
+        const workflowEntries = entries.filter(([_, item]) => item instanceof WfBuilder) as [string, Workflow<unknown, unknown>][];
         const fnEntries = entries.filter(([_, item]) => typeof item === 'function') as [string, StepFn<unknown, unknown, Input, Output>][];
 
         // Run functions in parallel inline

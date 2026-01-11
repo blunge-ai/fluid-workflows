@@ -3,7 +3,7 @@ import type { Logger } from './utils';
 import { defaultLogger } from './utils';
 import type { WfArray, NamesOfWfs, RequireKeys } from './typeHelpers';
 import type { Workflow } from './types';
-import { collectWorkflows } from './WorkflowBuilder';
+import { collectWorkflows } from './WfBuilder';
 
 export class Config<
   const Wfs extends WfArray<string>,

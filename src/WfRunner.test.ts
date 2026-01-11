@@ -1,15 +1,15 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
-import { WorkflowBuilder as Workflow } from '~/WorkflowBuilder';
-import { WorkflowRunner } from '~/index';
+import { WfBuilder } from '~/WfBuilder';
+import { WfRunner } from '~/index';
 test('run step', async () => {
-  const workflow = Workflow
+  const workflow = WfBuilder
     .create({ name: 'add-a-and-b', version: 1 })
     .step(async ({ a, b }: { a: number, b: number }) => {
       return { c: a + b };
     });
 
-  const runner = new WorkflowRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
+  const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
   const result = await runner.run(workflow, { a: 12, b: 34 });
   expect(result.c).toBe(46);
 });
@@ -17,7 +17,7 @@ test('run step', async () => {
 test('complete finishes the workflow early', async () => {
   const schema = z.object({ a: z.number(), b: z.number() });
 
-  const workflow = Workflow
+  const workflow = WfBuilder
     .create({ name: 'complete', version: 1, inputSchema: schema })
     .step(async ({ a, b }, { complete }) => {
       if (a + b === 5) {
@@ -29,7 +29,7 @@ test('complete finishes the workflow early', async () => {
       return { sum: 9999 };
     });
 
-  const runner = new WorkflowRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
+  const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
   const result = await runner.run(workflow, { a: 2, b: 3 });
   expect(result.sum).toBe(5);
 });
@@ -37,7 +37,7 @@ test('complete finishes the workflow early', async () => {
 test('restart restarts from the beginning', async () => {
   const schema = z.object({ iterations: z.number(), value: z.number() });
 
-  const workflow = Workflow
+  const workflow = WfBuilder
     .create({ name: 'restart', version: 1, inputSchema: schema })
     .step(async (input, { restart }) => {
       if (input.iterations > 0) {
@@ -49,7 +49,7 @@ test('restart restarts from the beginning', async () => {
       return { out: after };
     });
 
-  const runner = new WorkflowRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
+  const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
   const result = await runner.run(workflow, { iterations: 3, value: 10 });
   expect(result.out).toBe(13);
 });

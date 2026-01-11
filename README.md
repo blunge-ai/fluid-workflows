@@ -1,9 +1,8 @@
 # fluid-workflows
 
-Type-safe workflow composition and job-queue execution with adapters.
+Type-safe durable workflows with fluid builder syntax and optional job-queue execution with adapters.
 
-The main problem this project attempts to solve is the separation of workflow definition and
-execution.
+The main problem this project attempts to solve is the separation of workflow definition from how they are executed. Execution can involve persisting intermediary steps through a storage adapter (e.g. redis, or cloudflare durable objects) as well as queueing jobs using a queueing adapater (e.g. BullMq, or cloudflare queues).
 
 ## Install
 
@@ -171,15 +170,6 @@ const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
      }
   }));
 ```
-
-
-## Implementation details
-
-* `Workflow` a builder pattern API to define the individual steps of a workflow,
-* `JobQueueEngine` - interface that allows adapters for multiple queueing engines to be implemented,
-* `JobQueueWorkflowRunner` - runs/executes workflows using a `JobQueueEngine`, usually in a worker process,
-* `JobQueueWorkflowDispatcher` - dispatches/submits workflows to be run using a `JobQueueEngine`, usually on the app server,
-* `BullMqAdapter` - an implementation of `JobQueueEngine` for **BullMq**.
 
 ## License
 

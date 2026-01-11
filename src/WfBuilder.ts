@@ -14,7 +14,7 @@ import {
   CompleteWrapper,
   isStepsChildren,
 } from './types';
-import { WorkflowRunner } from './WorkflowRunner';
+import { WfRunner } from './WfRunner';
 
 // Re-export everything from types.ts
 export * from './types';
@@ -42,7 +42,7 @@ type Unset = typeof __WF_UNSET__;
 
 export type StripSentinel<T> = T extends Unset ? never : T;
 
-export class WorkflowBuilder<Input = Unset, Output = never, const Names extends string = never, NextOutput = never, CtrlOutput = never> implements Workflow<Input, Output, Names, NextOutput, CtrlOutput> {
+export class WfBuilder<Input = Unset, Output = never, const Names extends string = never, NextOutput = never, CtrlOutput = never> implements Workflow<Input, Output, Names, NextOutput, CtrlOutput> {
   public name: Names;
   public version: number;
   public numSteps: number;
@@ -68,18 +68,18 @@ export class WorkflowBuilder<Input = Unset, Output = never, const Names extends 
     this._runner = runner;
   }
 
-  static create<const Name extends string>(props: { name: Name, version: number, runner?: Runner }): WorkflowBuilder<Unset, Unset, Name>;
-  static create<const Name extends string, S extends ZodTypeAny>(props: { name: Name, version: number, inputSchema: S, runner?: Runner }): WorkflowBuilder<z.input<S>, Unset, Name>;
-  static create<const Name extends string, S extends ZodTypeAny>(props: { name: Name, version: number, inputSchema?: S, runner?: Runner }): WorkflowBuilder<Unset | z.input<S>, Unset, Name> {
+  static create<const Name extends string>(props: { name: Name, version: number, runner?: Runner }): WfBuilder<Unset, Unset, Name>;
+  static create<const Name extends string, S extends ZodTypeAny>(props: { name: Name, version: number, inputSchema: S, runner?: Runner }): WfBuilder<z.input<S>, Unset, Name>;
+  static create<const Name extends string, S extends ZodTypeAny>(props: { name: Name, version: number, inputSchema?: S, runner?: Runner }): WfBuilder<Unset | z.input<S>, Unset, Name> {
     const { name, version, runner } = props;
-    return new WorkflowBuilder<unknown, unknown, Name>({ name, version }, [], props.inputSchema, runner) as unknown as WorkflowBuilder<Unset | z.input<S>, Unset, Name>;
+    return new WfBuilder<unknown, unknown, Name>({ name, version }, [], props.inputSchema, runner) as unknown as WfBuilder<Unset | z.input<S>, Unset, Name>;
   }
 
   private async getRunner(): Promise<Runner> {
     if (this._runner) {
       return this._runner;
     }
-    const runner = new WorkflowRunner({ workflows: [this as Workflow], lockTimeoutMs: 60000 });
+    const runner = new WfRunner({ workflows: [this as Workflow], lockTimeoutMs: 60000 });
     this._runner = runner;
     return runner;
   }
@@ -97,9 +97,9 @@ export class WorkflowBuilder<Input = Unset, Output = never, const Names extends 
     ChildNext,
     ChildCtrl,
   >(
-    this: WorkflowBuilder<Unset, Output, Names, NextOutput, CtrlOutput>,
+    this: WfBuilder<Unset, Output, Names, NextOutput, CtrlOutput>,
     child: Workflow<ChildInput, ChildOutput, Cn, ChildNext, ChildCtrl>
-  ): WorkflowBuilder<ChildInput, MkOutput<CtrlOutput, ChildOutput>, Names | Cn, ChildInput & ChildOutput, CtrlOutput>;
+  ): WfBuilder<ChildInput, MkOutput<CtrlOutput, ChildOutput>, Names | Cn, ChildInput & ChildOutput, CtrlOutput>;
   // .step(workflow) - subsequent step with child workflow, receives accumulated state, output is merged
   step<
     ChildInput,
@@ -108,32 +108,32 @@ export class WorkflowBuilder<Input = Unset, Output = never, const Names extends 
     ChildNext,
     ChildCtrl,
   >(
-    this: WorkflowBuilder<Input, Output, Names, NextOutput, CtrlOutput>,
+    this: WfBuilder<Input, Output, Names, NextOutput, CtrlOutput>,
     child: Workflow<ChildInput, ChildOutput, Cn, ChildNext, ChildCtrl>
-  ): WorkflowBuilder<Input, MkOutput<CtrlOutput, NextOutput & ChildOutput>, Names | Cn, NextOutput & ChildOutput, CtrlOutput>;
+  ): WfBuilder<Input, MkOutput<CtrlOutput, NextOutput & ChildOutput>, Names | Cn, NextOutput & ChildOutput, CtrlOutput>;
   // .step(fn) - first step, infers workflow input from function parameter (no schema)
   step<StepInput, StepOutput, SwfOutput>(
-    this: WorkflowBuilder<Unset, Output, Names, NextOutput, CtrlOutput>,
+    this: WfBuilder<Unset, Output, Names, NextOutput, CtrlOutput>,
     stepFn: StepFn<StepInput, StepOutput, StepInput, SwfOutput>
-  ): WorkflowBuilder<StepInput, MkOutput<CtrlOutput, StepOutput>, Names, StepInput & StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
+  ): WfBuilder<StepInput, MkOutput<CtrlOutput, StepOutput>, Names, StepInput & StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
   // .step(fn) - first step with schema input (Input is set, Output is Unset, NextOutput is never)
   step<StepOutput, SwfOutput>(
-    this: WorkflowBuilder<Input, Unset, Names, never, never>,
+    this: WfBuilder<Input, Unset, Names, never, never>,
     stepFn: StepFn<Input, StepOutput, Input, SwfOutput>
-  ): WorkflowBuilder<Input, MkOutput<never, StepOutput>, Names, Input & StripCtrl<StepOutput>, MkCtrlOut<never, StepOutput>>;
+  ): WfBuilder<Input, MkOutput<never, StepOutput>, Names, Input & StripCtrl<StepOutput>, MkCtrlOut<never, StepOutput>>;
   // .step(fn) - subsequent step with function
   step<StepOutput, WfOutput, SwfOutput>(
-    this: WorkflowBuilder<Input, never, Names, never, never>,
+    this: WfBuilder<Input, never, Names, never, never>,
     stepFn: StepFn<Input, StepOutput, Input, SwfOutput>
-  ): WorkflowBuilder<Input, MkOutput<CtrlOutput, StepOutput>, Names, Input & StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
+  ): WfBuilder<Input, MkOutput<CtrlOutput, StepOutput>, Names, Input & StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
   step<StepOutput, SwfOutput>(
-    this: WorkflowBuilder<Input, Output, Names, NextOutput, CtrlOutput>,
+    this: WfBuilder<Input, Output, Names, NextOutput, CtrlOutput>,
     stepFn: StepFn<NextOutput, StepOutput, Input, SwfOutput>
-  ): WorkflowBuilder<Input, MkOutput<CtrlOutput, StepOutput>, Names, NextOutput & StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
+  ): WfBuilder<Input, MkOutput<CtrlOutput, StepOutput>, Names, NextOutput & StripCtrl<StepOutput>, MkCtrlOut<CtrlOutput, StepOutput>>;
   step(
     stepFnOrChild: StepFn<any, any, any, any> | Workflow<any, any, string, any, any>
-  ): WorkflowBuilder<any, any, string, any, any> {
-    return new WorkflowBuilder(
+  ): WfBuilder<any, any, string, any, any> {
+    return new WfBuilder(
       { name: this.name, version: this.version },
       [ ...this.stepFns, stepFnOrChild ],
       this.inputSchema,
@@ -144,8 +144,8 @@ export class WorkflowBuilder<Input = Unset, Output = never, const Names extends 
   // .parallel() - invoke children with the full accumulated input, map outputs to keys
   parallel<
     const Cm extends ParallelMap<Input & NextOutput, Input, Output>,
-  >(childrenMap: Cm): WorkflowBuilder<Input, MkOutput<CtrlOutput, Input & NextOutput & ParallelOutputs<Cm, Input, Output>>, Names | ParallelNames<Cm>, Input & NextOutput & ParallelOutputs<Cm, Input, Output>, CtrlOutput> {
-    return new WorkflowBuilder(
+  >(childrenMap: Cm): WfBuilder<Input, MkOutput<CtrlOutput, Input & NextOutput & ParallelOutputs<Cm, Input, Output>>, Names | ParallelNames<Cm>, Input & NextOutput & ParallelOutputs<Cm, Input, Output>, CtrlOutput> {
+    return new WfBuilder(
       { name: this.name, version: this.version },
       [ ...this.stepFns, new StepsChildren(childrenMap) ],
       this.inputSchema,
@@ -188,13 +188,13 @@ export function collectWorkflows(workflows: Workflow<unknown, unknown>[]): Workf
     seen.add(key);
     result.push(wf);
     for (const step of wf.stepFns) {
-      if (step instanceof WorkflowBuilder) {
+      if (step instanceof WfBuilder) {
         visit(step as unknown as Workflow<unknown, unknown>);
       } else if (typeof step === 'function') {
         continue;
       } else if (isStepsChildren(step)) {
         for (const child of Object.values(step.children)) {
-          if (child instanceof WorkflowBuilder) {
+          if (child instanceof WfBuilder) {
             visit(child as unknown as Workflow<unknown, unknown>);
           }
         }

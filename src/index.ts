@@ -1,20 +1,20 @@
 export {
- WorkflowBuilder,
-} from './WorkflowBuilder';
+ WfBuilder,
+} from './WfBuilder';
 export type {
  Workflow,
  WorkflowProps,
  WorkflowRunOptions,
  ProgressFn,
  StepFn,
-} from './WorkflowBuilder';
+} from './WfBuilder';
 
 export {
   withRestartWrapper,
   withCompleteWrapper,
   isRestartWrapper,
   isCompleteWrapper,
-} from './WorkflowBuilder';
+} from './WfBuilder';
 export {
  JobQueueWorkflowRunner
 } from './jobQueue/JobQueueWorkflowRunner';
@@ -24,19 +24,19 @@ export {
 export type { JobQueueWorkflowDispatcherInterface } from './jobQueue/JobQueueWorkflowDispatcher';
 export { Config } from './Config';
 export { BullMqAdapter } from './jobQueue/BullMqAdapter';
-export { WorkflowRunner } from './WorkflowRunner';
+export { WfRunner } from './WfRunner';
 export type { Storage } from './storage/Storage';
 export { RedisStorage } from './storage/RedisStorage';
 export { MemoryStorage } from './storage/MemoryStorage';
 export { InMemoryJobQueueAdapter } from './jobQueue/InMemoryJobQueueAdapter';
 export { HttpJobQueueEngineClient } from './jobQueue/HttpJobQueueEngineClient';
 export { HttpJobQueueEngineServer } from './jobQueue/HttpJobQueueEngineServer';
-export type { WorkflowDispatcher, DispatchOptions, Runner, RunOptions } from './types';
+export type { WfDispatcher, DispatchOptions, Runner, RunOptions } from './types';
 
 import { Config } from './Config';
 import { JobQueueWorkflowRunner } from './jobQueue/JobQueueWorkflowRunner';
 import { JobQueueWorkflowDispatcher } from './jobQueue/JobQueueWorkflowDispatcher';
-import { WorkflowBuilder } from './WorkflowBuilder';
+import { WfBuilder } from './WfBuilder';
 import type { JobQueueEngine } from './jobQueue/JobQueueEngine';
 import type { Logger } from './utils';
 import type { WfArray, NamesOfWfs, RequireKeys } from './typeHelpers';
@@ -53,4 +53,4 @@ export function config<const Wfs extends WfArray<string>, const Qs extends Recor
   return { runner, dispatcher } as const;
 }
 
-export const workflow: typeof WorkflowBuilder.create = WorkflowBuilder.create;
+export const workflow: typeof WfBuilder.create = WfBuilder.create;

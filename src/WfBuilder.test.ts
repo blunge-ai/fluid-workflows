@@ -1,10 +1,10 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
-import { WorkflowBuilder as Workflow } from '~/WorkflowBuilder';
+import { WfBuilder } from '~/WfBuilder';
 
 test('run step', async () => {
 
-  const workflow = Workflow
+  const workflow = WfBuilder
     .create({ name: 'add-a-and-b', version: 1 })
     .step(async ({ a, b }: { a: number, b: number }) => {
       return { c: a + b };
@@ -17,13 +17,13 @@ test('run step', async () => {
 
 test('run child workflow', async () => {
 
-  const child = Workflow
+  const child = WfBuilder
     .create({ name: 'child-workflow', version: 1 })
     .step(async ({ childInput }: { childInput: string }) => {
       return { childOutput: `child(${childInput})` };
     });
 
-  const workflow = Workflow
+  const workflow = WfBuilder
     .create({ name: 'parent-workflow', version: 1 })
     .step(async ({ inputString }: { inputString: string }) => {
       return { childInput: `input(${inputString})` };
@@ -41,7 +41,7 @@ test('run child workflow', async () => {
 test('zod input schema', async () => {
   const schema = z.object({ a: z.number(), b: z.number() });
 
-  const workflow = Workflow
+  const workflow = WfBuilder
     .create({ name: 'sum-with-zod', version: 1, inputSchema: schema })
     .step(async (input, { complete }) => {
       const { a, b } = input;
@@ -55,7 +55,7 @@ test('zod input schema', async () => {
 test('complete finishes the workflow early', async () => {
   const schema = z.object({ a: z.number(), b: z.number() });
 
-  const workflow = Workflow
+  const workflow = WfBuilder
     .create({ name: 'complete-test', version: 1, inputSchema: schema })
     .step(async ({ a, b }, { complete }) => {
       if (a + b === 5) {
@@ -74,7 +74,7 @@ test('complete finishes the workflow early', async () => {
 test('restart restarts from the beginning', async () => {
   const schema = z.object({ iterations: z.number(), value: z.number() });
 
-  const workflow = Workflow
+  const workflow = WfBuilder
     .create({ name: 'restart-test', version: 1, inputSchema: schema })
     .step(async (input, { restart }) => {
       if (input.iterations > 0) {
@@ -91,15 +91,15 @@ test('restart restarts from the beginning', async () => {
 });
 
 test('.parallel() runs children with full accumulated input', async () => {
-  const child3 = Workflow
+  const child3 = WfBuilder
     .create({ name: 'child3', version: 1 })
     .step(async ({ s, s2 }: { s: string, s2: string }) => `child3(${s}, ${s2})`);
 
-  const child4 = Workflow
+  const child4 = WfBuilder
     .create({ name: 'child4', version: 1 })
     .step(async ({ s, s2 }: { s: string, s2: string }) => `child4(${s}, ${s2})`);
 
-  const parent = Workflow
+  const parent = WfBuilder
     .create({ name: 'parent-steps', version: 1 })
     .step(async ({ s }: { s: string }) => ({ s2: `step1(${s})` }))
     .parallel({ s3: child3, s4: child4 })
@@ -112,11 +112,11 @@ test('.parallel() runs children with full accumulated input', async () => {
 });
 
 test('.step(workflow) as first step', async () => {
-  const child = Workflow
+  const child = WfBuilder
     .create({ name: 'first-child', version: 1 })
     .step(async ({ x }: { x: number }) => ({ y: x * 2 }));
 
-  const parent = Workflow
+  const parent = WfBuilder
     .create({ name: 'parent-first-child', version: 1 })
     .step(child)
     .step(async ({ x, y }) => ({
@@ -128,7 +128,7 @@ test('.step(workflow) as first step', async () => {
 });
 
 test('.parallel() with functions', async () => {
-  const parent = Workflow
+  const parent = WfBuilder
     .create({ name: 'parent-parallel-fns', version: 1 })
     .step(async ({ x }: { x: number }) => ({ y: x * 2 }))
     .parallel({
@@ -145,11 +145,11 @@ test('.parallel() with functions', async () => {
 });
 
 test('.parallel() with mixed workflows and functions', async () => {
-  const child = Workflow
+  const child = WfBuilder
     .create({ name: 'parallel-child', version: 1 })
     .step(async ({ x, y }: { x: number, y: number }) => ({ z: x + y }));
 
-  const parent = Workflow
+  const parent = WfBuilder
     .create({ name: 'parent-parallel-mixed', version: 1 })
     .step(async ({ x }: { x: number }) => ({ y: x * 2 }))
     .parallel({

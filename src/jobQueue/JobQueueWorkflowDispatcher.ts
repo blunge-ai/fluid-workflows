@@ -1,12 +1,12 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Workflow, findWorkflow } from '../WorkflowBuilder';
+import { Workflow, findWorkflow } from '../WfBuilder';
 import { makeWorkflowJobData } from '../WorkflowJob';
 import type { JobResultStatus } from './JobQueueEngine';
 import { isResultStatus } from './JobQueueEngine';
 import { Logger, assert } from '../utils';
 import { WfArray, NamesOfWfs, MatchingWorkflow } from '../typeHelpers';
 import { Config } from '../Config';
-import type { WorkflowDispatcher, DispatchOptions } from '../types';
+import type { WfDispatcher, DispatchOptions } from '../types';
 
 export type Opts = {
   logger: Logger,
@@ -15,7 +15,7 @@ export type Opts = {
 export interface JobQueueWorkflowDispatcherInterface<
   Wfs extends WfArray<string>,
   Qs extends Record<NamesOfWfs<Wfs>, string>
-> extends WorkflowDispatcher<Wfs> {
+> extends WfDispatcher<Wfs> {
   readonly config: Config<Wfs, Qs>;
 }
 

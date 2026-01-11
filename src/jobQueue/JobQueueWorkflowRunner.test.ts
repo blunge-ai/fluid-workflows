@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { z } from 'zod';
-import { WorkflowBuilder as Workflow } from '~/WorkflowBuilder';
+import { WfBuilder } from '~/WfBuilder';
 import { JobQueueWorkflowRunner } from '~/jobQueue/JobQueueWorkflowRunner';
 import { JobQueueWorkflowDispatcher } from '~/jobQueue/JobQueueWorkflowDispatcher';
 import { BullMqAdapter } from '~/jobQueue/BullMqAdapter';
@@ -21,7 +21,7 @@ function setup() {
 test('run step', async () => {
   const { engine, queue } = setup();
 
-  const workflow = Workflow
+  const workflow = WfBuilder
     .create({ name: 'add-a-and-b', version: 1 })
     .step(async ({ a, b }: { a: number, b: number }) => {
       return { c: a + b };
@@ -40,13 +40,13 @@ test('run step', async () => {
 test('run child workflow', async () => {
   const { engine, queue } = setup();
 
-  const child = Workflow
+  const child = WfBuilder
     .create({ name: 'child-workflow', version: 1 })
     .step(async ({ childInput }: { childInput: string }) => {
       return { childOutput: `child(${childInput})` };
     });
 
-  const workflow = Workflow
+  const workflow = WfBuilder
     .create({ name: 'parent-workflow', version: 1 })
     .step(async ({ parentInput }: { parentInput: string }) => {
       return { childInput: `input(${parentInput})` };
@@ -71,19 +71,19 @@ test('run child workflow', async () => {
 test('run parallel children', async () => {
   const { engine } = setup();
 
-  const child1 = Workflow
+  const child1 = WfBuilder
     .create({ name: 'child1', version: 1 })
     .step(async ({ n, n2 }: { n: number, n2: number }) => {
       return { a2: (n + 1) * 2 };
     });
 
-  const child2 = Workflow
+  const child2 = WfBuilder
     .create({ name: 'child2', version: 1 })
     .step(async ({ n, n2 }: { n: number, n2: number }) => {
       return { s2: `child2(n=${n})` };
     });
 
-  const parent = Workflow
+  const parent = WfBuilder
     .create({ name: 'parent-two-children', version: 1 })
     .step(async ({ n }: { n: number }) => {
       return { n2: n };
@@ -110,7 +110,7 @@ test('restart restarts from the beginning in JobQueueWorkflowRunner', async () =
 
   const schema = z.object({ iterations: z.number(), value: z.number() });
 
-  const workflow = Workflow
+  const workflow = WfBuilder
     .create({ name: 'restart-runner', version: 1, inputSchema: schema })
     .step(async (input, { restart }) => {
       if (input.iterations > 0) {
