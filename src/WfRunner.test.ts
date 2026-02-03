@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { WfBuilder } from '~/WfBuilder';
 import { WfRunner, SuspendExecutionException } from '~/WfRunner';
 import { defaultStorage, resetDefaultStorage } from '~/storage/defaultStorage';
+import type { WfJobData } from '~/types';
 
 beforeEach(() => {
   resetDefaultStorage();
@@ -15,7 +16,7 @@ test('run step', async () => {
       return { c: a + b };
     });
 
-  const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
+  const runner = new WfRunner({ workflows: [workflow], jobTimeoutMs: 1000 });
   const result = await runner.run(workflow, { a: 12, b: 34 });
   expect(result.c).toBe(46);
 });
@@ -26,7 +27,7 @@ test('input schema validation', async () => {
     .create({ name: 'input-schema-runner', version: 1, inputSchema })
     .step(async ({ a, b }) => ({ sum: a + b }));
 
-  const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
+  const runner = new WfRunner({ workflows: [workflow], jobTimeoutMs: 1000 });
   
   const result = await runner.run(workflow, { a: 2, b: 3 });
   expect(result.sum).toBe(5);
@@ -46,8 +47,8 @@ test('output schema validation', async () => {
     .create({ name: 'output-invalid-runner', version: 1, inputSchema, outputSchema })
     .step(async ({ a }) => ({ result: 'not-a-number' as any }));
 
-  const validRunner = new WfRunner({ workflows: [validWorkflow], lockTimeoutMs: 1000 });
-  const invalidRunner = new WfRunner({ workflows: [invalidWorkflow], lockTimeoutMs: 1000 });
+  const validRunner = new WfRunner({ workflows: [validWorkflow], jobTimeoutMs: 1000 });
+  const invalidRunner = new WfRunner({ workflows: [invalidWorkflow], jobTimeoutMs: 1000 });
 
   const result = await validRunner.run(validWorkflow, { a: 5 });
   expect(result.result).toBe(10);
@@ -69,8 +70,8 @@ test('output schema validation with complete()', async () => {
     .step(async ({ a }, { complete }) => complete({ result: 'bad' as any }))
     .step(async () => ({ result: 9999 }));
 
-  const validRunner = new WfRunner({ workflows: [validWorkflow], lockTimeoutMs: 1000 });
-  const invalidRunner = new WfRunner({ workflows: [invalidWorkflow], lockTimeoutMs: 1000 });
+  const validRunner = new WfRunner({ workflows: [validWorkflow], jobTimeoutMs: 1000 });
+  const invalidRunner = new WfRunner({ workflows: [invalidWorkflow], jobTimeoutMs: 1000 });
 
   const result = await validRunner.run(validWorkflow, { a: 5 });
   expect(result.result).toBe(10);
@@ -93,7 +94,7 @@ test('complete finishes the workflow early', async () => {
       return { sum: 9999 };
     });
 
-  const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
+  const runner = new WfRunner({ workflows: [workflow], jobTimeoutMs: 1000 });
   const result = await runner.run(workflow, { a: 2, b: 3 });
   expect(result.sum).toBe(5);
 });
@@ -113,7 +114,7 @@ test('restart restarts from the beginning', async () => {
       return { out: after };
     });
 
-  const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 1000 });
+  const runner = new WfRunner({ workflows: [workflow], jobTimeoutMs: 1000 });
   const result = await runner.run(workflow, { iterations: 3, value: 10 });
   expect(result.out).toBe(13);
 });
@@ -140,7 +141,7 @@ test('durable execution: resume after shutdown', async () => {
 
   // Use shared storage so state persists between runs
   const storage = defaultStorage;
-  const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 60000, storage });
+  const runner = new WfRunner({ workflows: [workflow], jobTimeoutMs: 60000, storage });
   const jobId = 'test-durable-job-123';
 
   // First run: should abort at step 2 with SuspendExecutionException
@@ -159,8 +160,8 @@ test('durable execution: resume after shutdown', async () => {
     input: { value: 5, step1Result: 10 },  // Step 1 result merged
   });
 
-  // Resume the job using its jobId (discovered from getActiveJobs)
-  const result = await runner.resume<{ finalResult: number }>(activeJob.jobId);
+  // Resume the job using its jobId and jobData (discovered from getActiveJobs)
+  const result = await runner.resume<{ finalResult: number }>(activeJob.jobId, activeJob.state as WfJobData<unknown>);
   
   // step1Result = 5 * 2 = 10
   // step2Result = 10 + 10 = 20
@@ -181,7 +182,7 @@ test('durable execution: new job if no existing state', async () => {
     .step(async ({ x }: { x: number }) => ({ result: x + 1 }));
 
   const storage = defaultStorage;
-  const runner = new WfRunner({ workflows: [workflow], lockTimeoutMs: 60000, storage });
+  const runner = new WfRunner({ workflows: [workflow], jobTimeoutMs: 60000, storage });
 
   // Run with a jobId that doesn't exist - should create new job
   const result = await runner.run(workflow, { x: 10 }, { jobId: 'new-job-id' });
@@ -200,7 +201,7 @@ test('durable execution: validates workflow name on resume', async () => {
     .step(async () => ({ done: true }));
 
   const storage = defaultStorage;
-  const runner = new WfRunner({ workflows: [workflow1, workflow2], lockTimeoutMs: 60000, storage });
+  const runner = new WfRunner({ workflows: [workflow1, workflow2], jobTimeoutMs: 60000, storage });
   const jobId = 'mismatched-job';
 
   // Start workflow1
@@ -225,12 +226,12 @@ test('durable execution: validates workflow version on resume', async () => {
   const storage = defaultStorage;
   
   // Start with v1
-  const runner1 = new WfRunner({ workflows: [workflowV1], lockTimeoutMs: 60000, storage });
+  const runner1 = new WfRunner({ workflows: [workflowV1], jobTimeoutMs: 60000, storage });
   const jobId = 'version-mismatch-job';
   await expect(runner1.run(workflowV1, {}, { jobId })).rejects.toThrow(SuspendExecutionException);
 
   // Try to resume with v2 - should fail
-  const runner2 = new WfRunner({ workflows: [workflowV2], lockTimeoutMs: 60000, storage });
+  const runner2 = new WfRunner({ workflows: [workflowV2], jobTimeoutMs: 60000, storage });
   await expect(runner2.run(workflowV2, {}, { jobId }))
     .rejects.toThrow('Job version-mismatch-job has version 1 but workflow has version 2');
 });

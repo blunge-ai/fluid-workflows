@@ -19,7 +19,8 @@ export type Opts = {
   concurrency: number,
   polling: boolean,
   logger: Logger,
-  maximumWaitTimeoutMs: number,
+  jobTimeoutMs: number,
+  resultTtlMs: number,
 
   bullWorkerBlockingTimeoutSecs: number,
   pollingDelayMs: number,
@@ -27,7 +28,7 @@ export type Opts = {
 
 export type ConstructorOpts
  = Partial<Opts>
- & Pick<Opts, 'attempts' | 'lockTimeoutMs'>;
+ & Pick<Opts, 'attempts' | 'jobTimeoutMs'>;
 
 export type QueueOpts = Opts & {
   queue: string,
@@ -133,7 +134,7 @@ export class BullMqJobQueue<Input = unknown, Output = unknown, Meta = unknown, P
       dataKey: opts.dataKey,
     };
     jobData.job = { ...job, input: undefined as Input };
-    await this.redis.set(`jobs:input:${jobData.dataKey}`, pack(job.input), 'PX', this.opts.maximumWaitTimeoutMs);
+    await this.redis.set(`jobs:input:${jobData.dataKey}`, pack(job.input), 'PX', this.opts.jobTimeoutMs);
     let parent = undefined;
     if (opts.parentId) {
       assert(opts.parentQueue);
@@ -252,7 +253,7 @@ export class BullMqJobQueue<Input = unknown, Output = unknown, Meta = unknown, P
       });
     }
     if (input !== undefined) {
-      await this.redis.set(`jobs:input:${bullJob.data.dataKey}`, pack(input), 'PX', this.opts.maximumWaitTimeoutMs);
+      await this.redis.set(`jobs:input:${bullJob.data.dataKey}`, pack(input), 'PX', this.opts.jobTimeoutMs);
     }
     return { interrupt: false };
   }
@@ -276,7 +277,7 @@ export class BullMqJobQueue<Input = unknown, Output = unknown, Meta = unknown, P
       ...result,
       output: undefined
     } as JobResult<Output | undefined>;
-    await this.redis.set(`jobs:result:${bullJob.data.dataKey}`, pack(result), 'PX', this.opts.maximumWaitTimeoutMs)
+    await this.redis.set(`jobs:result:${bullJob.data.dataKey}`, pack(result), 'PX', this.opts.resultTtlMs)
     if (result.type === 'error') {
       this.opts.logger.info({
         jobId,
@@ -409,10 +410,11 @@ export class BullMqAdapter implements JobQueueEngine {
       concurrency: 1,
       polling: false,
       logger: defaultLogger,
-      maximumWaitTimeoutMs: 60*60*24*365*1000,
       bullWorkerBlockingTimeoutSecs: 2,
       pollingDelayMs: 200,
       ...opts,
+      lockTimeoutMs: opts.lockTimeoutMs ?? Math.floor(opts.jobTimeoutMs / 3),
+      resultTtlMs: opts.resultTtlMs ?? 24 * 60 * 60 * 1000, // 24 hours default
     };
     this.redis = (opts.redisConnection ?? defaultRedisConnection)(); 
     this.subRedis = (opts.redisConnection ?? defaultRedisConnection)(); 

@@ -39,8 +39,8 @@ export class TestDurableObject extends DurableObject<Env> {
     return this.storage.getActiveJobs<T>();
   }
 
-  async setResult(jobId: string, result: unknown, status?: unknown): Promise<void> {
-    return this.storage.setResult(jobId, result, status);
+  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: unknown }): Promise<void> {
+    return this.storage.setResult(jobId, result, opts);
   }
 
   async close(): Promise<void> {
@@ -57,8 +57,15 @@ export class TestDurableObject extends DurableObject<Env> {
   /**
    * Get result (for testing).
    */
-  getResult(jobId: string): unknown | undefined {
-    return this.storage.getResult(jobId);
+  async getResult<T = unknown>(jobId: string): Promise<T | undefined> {
+    return this.storage.getResult<T>(jobId);
+  }
+
+  /**
+   * Clean up expired data.
+   */
+  async cleanup(): Promise<number> {
+    return this.storage.cleanup();
   }
 }
 

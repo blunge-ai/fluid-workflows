@@ -38,3 +38,15 @@ export const defaultLogger = {
   warn: (data: Record<string, unknown>, message: string) => console.warn(`${message}:\n${JSON.stringify(data)}`),
   info: (data: Record<string, unknown>, message: string) => console.log(`${message}:\n${JSON.stringify(data)}`),
 };
+
+/**
+ * Partition an array into chunks of the given size.
+ * The last chunk may contain fewer items.
+ */
+export function chunk<T>(array: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    result.push(array.slice(i, i + size));
+  }
+  return result;
+}

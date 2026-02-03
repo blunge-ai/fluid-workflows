@@ -22,11 +22,12 @@ test('job queues example', async () => {
   const { worker, dispatcher } = fwf.jobQueueConfig({
     engine: new fwf.BullMqAdapter({
       attempts: 1,
-      lockTimeoutMs: 8000,
+      jobTimeoutMs: 24000,
       blockingTimeoutSecs: 0.1,
     }),
     workflows: [parent],
     queues: { parent: 'parent-queue', child: 'child-queue' },
+    jobTimeoutMs: 30000,
   });
 
   const stop = worker.run('all');

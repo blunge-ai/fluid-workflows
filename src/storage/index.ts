@@ -1,7 +1,7 @@
 import type { Storage } from './Storage';
 import { MemoryStorage } from './MemoryStorage';
 
-export type { Storage, StoredJobState } from './Storage';
+export type { Storage, StoredJobState, LockResult } from './Storage';
 export { MemoryStorage } from './MemoryStorage';
 export { RedisStorage } from './RedisStorage';
 export { DurableObjectStorage } from './DurableObjectStorage';

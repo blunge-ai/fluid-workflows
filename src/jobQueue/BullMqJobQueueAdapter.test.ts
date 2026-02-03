@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 test('submit job', async () => {
   const engine = new BullMqAdapter({
     attempts: 1,
-    lockTimeoutMs: 8000
+    jobTimeoutMs: 24000,
   });
   const token = 'test-token';
   const queue = `queue-${uuidv4()}`;
@@ -44,7 +44,7 @@ test('submit job', async () => {
 test('submit children', async () => {
   const engine = new BullMqAdapter({
     attempts: 1,
-    lockTimeoutMs: 8000
+    jobTimeoutMs: 24000,
   });
   const token = 'test-token2';
   const queue = `queue-${uuidv4()}`;

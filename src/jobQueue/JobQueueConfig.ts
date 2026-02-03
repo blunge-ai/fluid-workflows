@@ -16,16 +16,22 @@ export class JobQueueConfig<
   public readonly queues: RequireKeys<Qs, NamesOfWfs<Wfs>>;
   public readonly logger: Logger;
   public readonly allWorkflows: Workflow<unknown, unknown>[];
+  public readonly jobTimeoutMs: number;
 
   constructor(args: {
     engine: JobQueueEngine,
     workflows: Wfs,
     queues: RequireKeys<Qs, NamesOfWfs<Wfs>>,
+    /**
+     * Maximum time a job is expected to run.
+     */
+    jobTimeoutMs: number,
     logger?: Logger,
   }) {
     this.engine = args.engine;
     this.workflows = args.workflows;
     this.queues = args.queues;
+    this.jobTimeoutMs = args.jobTimeoutMs;
     this.logger = args.logger ?? defaultLogger;
     this.allWorkflows = collectWorkflows(this.workflows as unknown as Workflow<unknown, unknown>[]);
 
@@ -50,6 +56,7 @@ export class JobQueueConfig<
     engine: JobQueueEngine,
     workflows: Wfs,
     queues: RequireKeys<Qs, NamesOfWfs<Wfs>>,
+    jobTimeoutMs: number,
     logger?: Logger,
   }) {
     const cfg = new JobQueueConfig<Wfs, Qs>(args);

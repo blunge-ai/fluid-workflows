@@ -1,4 +1,4 @@
-import type { Storage, StoredJobState } from './Storage';
+import type { Storage, StoredJobState, LockResult } from './Storage';
 
 /**
  * SQLite cursor interface for iterating query results.
@@ -44,7 +44,10 @@ type JobStateRow = {
 type JobResultRow = {
   job_id: string;
   result: string;
+  expires_at: number;
 };
+
+
 
 /**
  * Storage implementation for Cloudflare Durable Objects using SQLite.
@@ -72,8 +75,10 @@ export class DurableObjectStorage implements Storage {
       );
       CREATE TABLE IF NOT EXISTS job_results (
         job_id TEXT PRIMARY KEY,
-        result TEXT NOT NULL
+        result TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
       );
+
       CREATE INDEX IF NOT EXISTS idx_job_states_last_updated 
         ON job_states(last_updated_at);
     `);
@@ -139,18 +144,20 @@ export class DurableObjectStorage implements Storage {
     }));
   }
 
-  async setResult(jobId: string, result: unknown, status?: unknown): Promise<void> {
+  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: unknown }): Promise<void> {
     this.ensureInitialized();
     
     const resultJson = JSON.stringify(result);
+    const expiresAt = Date.now() + opts.ttlMs;
     
-    // Store result and clean up job state atomically
+    // Store result with expiration and clean up job state atomically
     this.sql.exec(
-      `INSERT INTO job_results (job_id, result) 
-       VALUES (?, ?)
-       ON CONFLICT(job_id) DO UPDATE SET result = excluded.result`,
+      `INSERT INTO job_results (job_id, result, expires_at) 
+       VALUES (?, ?, ?)
+       ON CONFLICT(job_id) DO UPDATE SET result = excluded.result, expires_at = excluded.expires_at`,
       jobId,
-      resultJson
+      resultJson,
+      expiresAt
     );
     
     this.sql.exec('DELETE FROM job_states WHERE job_id = ?', jobId);
@@ -158,22 +165,57 @@ export class DurableObjectStorage implements Storage {
     // status is ignored - no pub/sub support
   }
 
-  async close(): Promise<void> {
-    // Durable Objects don't need explicit cleanup
-    // The storage is managed by the runtime
+  /**
+   * No-op lock for Durable Objects.
+   * Durable Objects provide built-in serialization guarantees:
+   * - Single active instance globally
+   * - Input/output gates prevent concurrent request interleaving
+   * Therefore, explicit locking is unnecessary.
+   */
+  async lock(_jobId: string, _ttlMs: number): Promise<LockResult> {
+    return { acquired: true, token: 'durable-object-noop' };
   }
 
-  // Helper method for testing/debugging
-  getResult(jobId: string): unknown | undefined {
+  async unlock(_jobId: string, _token: string): Promise<boolean> {
+    return true;
+  }
+
+  async refreshLock(_jobId: string, _token: string, _ttlMs: number): Promise<boolean> {
+    return true;
+  }
+
+  async getResult<T = unknown>(jobId: string): Promise<T | undefined> {
     this.ensureInitialized();
     
+    const now = Date.now();
     const rows = this.sql.exec<JobResultRow>(
-      'SELECT result FROM job_results WHERE job_id = ?',
+      'SELECT result, expires_at FROM job_results WHERE job_id = ?',
       jobId
     ).toArray();
     
     const row = rows[0];
-    if (!row) return undefined;
-    return JSON.parse(row.result);
+    if (!row || row.expires_at <= now) return undefined;
+    
+    return JSON.parse(row.result) as T;
+  }
+
+  /**
+   * No-op for Durable Objects - locks always succeed immediately.
+   */
+  async waitForLock(_jobId: string, _timeoutMs: number): Promise<boolean> {
+    return true;
+  }
+
+  async cleanup(): Promise<number> {
+    this.ensureInitialized();
+    
+    const now = Date.now();
+    const cursor = this.sql.exec('DELETE FROM job_results WHERE expires_at <= ?', now);
+    return cursor.rowsWritten;
+  }
+
+  async close(): Promise<void> {
+    // Durable Objects don't need explicit cleanup
+    // The storage is managed by the runtime
   }
 }

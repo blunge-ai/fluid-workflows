@@ -55,7 +55,8 @@ const parent = fwf.create({ name: 'parent', version: 1 })
 const { worker, dispatcher } = fwf.jobQueueConfig({
   engine: new fwf.BullMqAdapter({ attempts: 1, lockTimeoutMs: 8000 }),
   workflows: [parent],
-  queues: { parent: 'parent-queue, child: 'child-queue' } ,
+  queues: { parent: 'parent-queue', child: 'child-queue' },
+  jobTimeoutMs: 60000, // Maximum time a job is expected to run (also used for state TTL)
 });
 
 // On a worker machine, run parent workflows

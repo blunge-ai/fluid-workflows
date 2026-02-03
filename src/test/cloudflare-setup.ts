@@ -23,7 +23,13 @@ function createDOStorageProxy(stub: DurableObjectStub<TestDurableObject>): Stora
     updateState: (jobId, opts) => stub.updateState(jobId, opts),
     getState: (jobId) => stub.getState(jobId),
     getActiveJobs: () => stub.getActiveJobs(),
-    setResult: (jobId, result, status) => stub.setResult(jobId, result, status),
+    setResult: (jobId, result, opts) => stub.setResult(jobId, result, opts),
+    getResult: (jobId) => stub.getResult(jobId),
+    lock: () => Promise.resolve({ acquired: true, token: 'do-proxy-noop' }),
+    unlock: () => Promise.resolve(true),
+    refreshLock: () => Promise.resolve(true),
+    waitForLock: () => Promise.resolve(true),
+    cleanup: () => stub.cleanup(),
     close: () => stub.close(),
   };
 }

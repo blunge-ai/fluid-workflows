@@ -83,7 +83,7 @@ export class WfBuilder<Input = Unset, Output = never, const Names extends string
     if (this._runner) {
       return this._runner;
     }
-    const runner = new WfRunner({ workflows: [this as Workflow], lockTimeoutMs: 60000 });
+    const runner = new WfRunner({ workflows: [this as Workflow], jobTimeoutMs: 60000 });
     this._runner = runner;
     return runner;
   }

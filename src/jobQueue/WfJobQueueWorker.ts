@@ -71,14 +71,15 @@ export class WfJobQueueWorker<
     // Create WfRunner with the inline dispatcher
     const runner = new WfRunner({
       workflows: this.config.workflows,
-      lockTimeoutMs: 60000, // TODO: make configurable
+      jobTimeoutMs: this.config.jobTimeoutMs,
       logger: this.config.logger,
       dispatcher,
     });
 
     try {
       // Run with the job data provided by the queue
-      const output = await runner.resume<Output>(jobId, { jobData: job.input });
+      // noLock: true because job queue engines handle job locking and timeout/rescheduling internally
+      const output = await runner.resume<Output>(jobId, job.input, { noLock: true });
 
       // Success - complete the job
       await this.config.engine.completeJob({

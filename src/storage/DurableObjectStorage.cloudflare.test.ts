@@ -58,7 +58,7 @@ describe('DurableObjectStorage', () => {
     let activeJobs = await stub.getActiveJobs();
     expect(activeJobs.find(j => j.jobId === jobId)).toBeDefined();
 
-    await stub.setResult(jobId, { success: true });
+    await stub.setResult(jobId, { success: true }, { ttlMs: 60000 });
 
     activeJobs = await stub.getActiveJobs();
     expect(activeJobs.find(j => j.jobId === jobId)).toBeUndefined();
