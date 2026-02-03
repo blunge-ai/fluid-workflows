@@ -17,21 +17,22 @@ export class RedisStorage implements Storage {
     status?: unknown,
     ttlMs: number,
   }): Promise<void> {
-    if (opts.state !== undefined) {
+    const hasState = opts.state !== undefined;
+    const hasStatus = opts.status !== undefined;
+    if (!hasState && !hasStatus) return;
+
+    const multi = this.redis.multi();
+    if (hasState) {
       const now = Date.now();
       const stored = { state: opts.state, lastUpdatedAt: now };
-      await this.redis.set(
-        `jobs:state:${jobId}`,
-        pack(stored),
-        'PX',
-        opts.ttlMs
-      );
+      multi.set(`jobs:state:${jobId}`, pack(stored), 'PX', opts.ttlMs);
       // Add to sorted set with lastUpdatedAt as score
-      await this.redis.zadd(ACTIVE_JOBS_KEY, now, jobId);
+      multi.zadd(ACTIVE_JOBS_KEY, now, jobId);
     }
-    if (opts.status !== undefined) {
-      await this.redis.publish(`jobs:status:${jobId}`, pack(opts.status));
+    if (hasStatus) {
+      multi.publish(`jobs:status:${jobId}`, pack(opts.status));
     }
+    await multi.exec();
   }
 
   async getState<T = unknown>(jobId: string): Promise<StoredJobState<T> | undefined> {
@@ -63,14 +64,16 @@ export class RedisStorage implements Storage {
   }
 
   async setResult(jobId: string, result: unknown, status?: unknown): Promise<void> {
-    await this.redis.set(`jobs:result:${jobId}`, pack(result));
+    const multi = this.redis.multi();
+    multi.set(`jobs:result:${jobId}`, pack(result));
     // Remove from active jobs set
-    await this.redis.zrem(ACTIVE_JOBS_KEY, jobId);
+    multi.zrem(ACTIVE_JOBS_KEY, jobId);
     // Delete the state key
-    await this.redis.del(`jobs:state:${jobId}`);
+    multi.del(`jobs:state:${jobId}`);
     if (status !== undefined) {
-      await this.redis.publish(`jobs:status:${jobId}`, pack(status));
+      multi.publish(`jobs:status:${jobId}`, pack(status));
     }
+    await multi.exec();
   }
 
   async close(): Promise<void> {
