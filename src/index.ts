@@ -22,7 +22,7 @@ export type { JobQueueWorkflowDispatcherInterface } from './jobQueue/JobQueueWor
 export { JobQueueConfig, JobQueueConfig as Config } from './jobQueue/JobQueueConfig';
 export { BullMqAdapter } from './jobQueue/BullMqAdapter';
 export { WfRunner, SuspendExecutionException, LockAcquisitionError, JobTimeoutError } from './WfRunner';
-export type { Storage, WithLockOptions, WithLockResult, LockLogger, LockContext } from './storage/Storage';
+export type { Storage, WithLockOptions, WithLockResult, LockLogger, LockContext, StatusListener } from './storage/Storage';
 export { withLock } from './storage/Storage';
 export { RedisStorage } from './storage/RedisStorage';
 export { MemoryStorage } from './storage/MemoryStorage';

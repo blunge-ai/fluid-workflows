@@ -3,11 +3,11 @@ import type { WfArray, NamesOfWfs, MatchingWorkflow } from './typeHelpers';
 import type { Workflow, WfDispatcher } from './types';
 import { WfBuilder, findWorkflow, isRestartWrapper, isCompleteWrapper, withRestartWrapper, withCompleteWrapper, collectWorkflows, isStepsChildren } from './WfBuilder';
 import type { StepFn } from './types';
-import { makeWorkflowJobData, WfJobData, WfProgressInfo } from './types';
+import { makeWorkflowJobData, WfJobData, WfUpdateInfo } from './types';
 import { defaultLogger } from './utils';
 import type { Logger } from './utils';
 import { JobResult } from './jobQueue/JobQueueEngine';
-import type { Storage, LockContext } from './storage/Storage';
+import type { Storage, LockContext, StatusListener } from './storage/Storage';
 import { withLock, LockAcquisitionError } from './storage/Storage';
 import { MemoryStorage } from './storage/MemoryStorage';
 
@@ -199,7 +199,7 @@ export class WfRunner<
     return Object.fromEntries(results);
   }
 
-  private async runSteps<Input, Output, Meta>(
+  private async runSteps<Input, Output, Meta, Info extends WfUpdateInfo>(
     workflow: Workflow<Input, Output>,
     jobId: string,
     jobData: WfJobData<Input>,
@@ -216,10 +216,10 @@ export class WfRunner<
     const refreshLock = opts?.lockCtx ? { token: opts.lockCtx.token, timeoutMs: opts.lockCtx.timeoutMs } : undefined;
 
     const runOptions = {
-      update: async (updateOpts: { input?: unknown, progress?: WfProgressInfo }) => {
+      update: async (updateOpts: { input?: unknown, info?: WfUpdateInfo }) => {
         const status = (
-          updateOpts.progress
-            ? { type: 'active', jobId, meta: opts?.meta as Meta, info: updateOpts.progress } as const
+          updateOpts.info
+            ? { type: 'active', jobId, meta: opts?.meta as Meta, info: updateOpts.info } as const
             : undefined
         );
         const hasInput = 'input' in updateOpts;
@@ -526,5 +526,15 @@ export class WfRunner<
     }
 
     return lockResult.result;
+  }
+
+  /**
+   * Subscribe to status updates for a job.
+   * @param jobId - The job ID to subscribe to
+   * @param listener - Callback invoked when status is published
+   * @returns Unsubscribe function
+   */
+  subscribe(jobId: string, listener: StatusListener): () => void {
+    return this.storage.subscribe(jobId, listener);
   }
 }

@@ -114,6 +114,11 @@ export async function withLock<T>(
 }
 
 /**
+ * Callback for status subscription events.
+ */
+export type StatusListener = (status: unknown) => void;
+
+/**
  * Storage interface for workflow state persistence and pub/sub.
  */
 export interface Storage {
@@ -194,6 +199,14 @@ export interface Storage {
    * @returns Number of items cleaned up
    */
   cleanup(): Promise<number>;
+
+  /**
+   * Subscribe to status updates for a job.
+   * @param jobId - The job ID to subscribe to
+   * @param listener - Callback invoked when status is published
+   * @returns Unsubscribe function
+   */
+  subscribe(jobId: string, listener: StatusListener): () => void;
 
   /**
    * Close the storage connection.

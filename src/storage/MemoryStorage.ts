@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { Storage, StoredJobState, LockResult } from './Storage';
+import type { Storage, StoredJobState, LockResult, StatusListener } from './Storage';
 
 type StoredEntry = {
   state: unknown,
@@ -26,6 +26,7 @@ export class MemoryStorage implements Storage {
   private readonly results = new Map<string, ResultEntry>();
   private readonly locks = new Map<string, LockEntry>();
   private readonly lockWaiters = new Map<string, Set<LockWaiter>>();
+  private readonly statusListeners = new Map<string, Set<StatusListener>>();
 
   async updateState(jobId: string, opts: {
     state?: unknown,
@@ -46,7 +47,23 @@ export class MemoryStorage implements Storage {
         existing.expiresAt = Date.now() + opts.refreshLock.timeoutMs;
       }
     }
-    // status is ignored in memory storage (no pub/sub)
+    // Publish status to in-memory listeners
+    if (opts.status !== undefined) {
+      this.publishStatus(jobId, opts.status);
+    }
+  }
+
+  private publishStatus(jobId: string, status: unknown): void {
+    const listeners = this.statusListeners.get(jobId);
+    if (listeners) {
+      for (const listener of listeners) {
+        try {
+          listener(status);
+        } catch (err) {
+          console.error('MemoryStorage: listener error', { jobId, err });
+        }
+      }
+    }
   }
 
   async getState<T = unknown>(jobId: string): Promise<StoredJobState<T> | undefined> {
@@ -76,12 +93,35 @@ export class MemoryStorage implements Storage {
     });
     // Remove from active states when result is set
     this.states.delete(jobId);
-    // status is ignored in memory storage (no pub/sub)
+    // Publish status to in-memory listeners
+    if (opts.status !== undefined) {
+      this.publishStatus(jobId, opts.status);
+    }
+  }
+
+  subscribe(jobId: string, listener: StatusListener): () => void {
+    let listeners = this.statusListeners.get(jobId);
+    if (!listeners) {
+      listeners = new Set();
+      this.statusListeners.set(jobId, listeners);
+    }
+    listeners.add(listener);
+
+    return () => {
+      const currentListeners = this.statusListeners.get(jobId);
+      if (currentListeners) {
+        currentListeners.delete(listener);
+        if (currentListeners.size === 0) {
+          this.statusListeners.delete(jobId);
+        }
+      }
+    };
   }
 
   async close(): Promise<void> {
     this.states.clear();
     this.results.clear();
+    this.statusListeners.clear();
   }
 
   async lock(jobId: string, ttlMs: number): Promise<LockResult> {

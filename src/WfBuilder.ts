@@ -7,6 +7,7 @@ import type {
   Runner,
   RunOptions,
   StripCtrl,
+  WfMeta,
 } from './types';
 import {
   StepsChildren,
@@ -15,6 +16,7 @@ import {
   isStepsChildren,
 } from './types';
 import { WfRunner } from './WfRunner';
+import type { StatusListener } from './storage/Storage';
 
 // Re-export everything from types.ts
 export * from './types';
@@ -88,9 +90,14 @@ export class WfBuilder<Input = Unset, Output = never, const Names extends string
     return runner;
   }
 
-  async run(input: Input, opts?: RunOptions<unknown>): Promise<Output> {
+  async run(input: Input, opts?: RunOptions<WfMeta>): Promise<Output> {
     const runner = await this.getRunner();
     return runner.run(this, input, opts) as Promise<Output>;
+  }
+
+  async subscribe(jobId: string, listener: StatusListener): Promise<() => void> {
+    const runner = await this.getRunner();
+    return (runner as WfRunner<any>).subscribe(jobId, listener);
   }
 
   // .step(workflow) - first step with child workflow

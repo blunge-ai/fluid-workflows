@@ -141,8 +141,9 @@ console.log(out.iterations); // 10
 ### update
 
 The `update` function allows the step's input data to be updated, such that if the step does not run
-to completion, it will be retried with the updated input data. Progress can also be reported through
-the update function by passing `progress` in the options object.
+to completion, it will be retried with the updated input data. Additional information, such as the
+current workflow progress, can be reported to job status listeners by passing an `info` property in
+the options object.
 
 ```ts
 const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
@@ -153,17 +154,32 @@ const parent = fwf.workflow({ name: 'parent', version: 1, inputSchema })
        const progress = Math.min(1, iterations / maxIterations);
 
        // calling update here updates the input data and reports the current progress
-       const { interrupt } = await update({ input: { iterations }, progress: { phase: 'iterating', progress } });
+       const { interrupt } = await update({ input: { iterations }, info: { phase: 'iterating', progress } });
 
        // or just report progress, without updating the step's input data
-       // const { interrupt } = await update({ progress: { phase: 'iterating', progress } });
+       // const { interrupt } = await update({ info: { phase: 'iterating', progress } });
 
-       if (interrupt) {
-         throw Error('interrupted');
-       }
-     }
-  }));
+        if (interrupt) {
+          throw Error('interrupted');
+        }
+      }
+   }));
 ```
+
+### subscribe
+
+The `subscribe` method allows job status listeners to receive real-time updates when a job's state changes (e.g., progress updates from `update()` calls or job completion).
+
+```ts
+const unsubscribe = await wf.subscribe(jobId, (status) => {
+  console.log('Job status update:', status);
+});
+
+// Later, stop listening
+unsubscribe();
+```
+
+Note: This example uses in-memory storage by default. To use Redis pub/sub for status updates across processes, pass a `RedisStorage` instance when creating the workflow.
 
 ## License
 

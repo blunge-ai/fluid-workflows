@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import Redis, { ChainableCommander } from 'ioredis';
-import type { Storage, StoredJobState, LockResult } from './Storage';
+import type { Storage, StoredJobState, LockResult, StatusListener } from './Storage';
 import { pack, unpack } from '../utils/packer';
 import { defaultRedisConnection } from '../utils/redis';
 import { chunk, timeout } from '~/utils';
@@ -48,11 +48,58 @@ else
 end
 `;
 
+/**
+ * Subscribe to a Redis channel with exponential backoff retry.
+ * @param subscriber - Redis client in subscriber mode
+ * @param channel - Channel to subscribe to
+ * @param maxDelayMs - Maximum delay between retries (default 5000ms)
+ */
+async function ensureSubscribed(
+  subscriber: Redis,
+  channel: string,
+  maxDelayMs = 5000,
+): Promise<void> {
+  let delayMs = 100;
+  while (true) {
+    try {
+      await subscriber.subscribe(channel);
+      return;
+    } catch (err) {
+      console.error('RedisStorage: subscribe error, retrying', { channel, err, delayMs });
+      await timeout(delayMs);
+      delayMs = Math.min(delayMs * 2, maxDelayMs);
+    }
+  }
+}
+
 export class RedisStorage implements Storage {
   private readonly redis: Redis;
+  private subscriber: Redis | null = null;
+  private readonly listeners = new Map<string, Set<StatusListener>>();
 
-  constructor(redisConnection?: () => Redis) {
-    this.redis = (redisConnection ?? defaultRedisConnection)();
+  constructor(private readonly redisConnection: () => Redis = defaultRedisConnection) {
+    this.redis = redisConnection();
+  }
+
+  private getSubscriber(): Redis {
+    if (!this.subscriber) {
+      this.subscriber = this.redisConnection();
+      this.subscriber.on('messageBuffer', (channelBuf: Buffer, messageBuf: Buffer) => {
+        const channel = channelBuf.toString();
+        const channelListeners = this.listeners.get(channel);
+        if (channelListeners) {
+          const status = unpack(messageBuf);
+          for (const listener of channelListeners) {
+            try {
+              listener(status);
+            } catch (err) {
+              console.error('RedisStorage: listener error', { channel, err });
+            }
+          }
+        }
+      });
+    }
+    return this.subscriber;
   }
 
   async updateState(jobId: string, opts: {
@@ -221,7 +268,37 @@ export class RedisStorage implements Storage {
     return expiredJobIds.length;
   }
 
+  subscribe(jobId: string, listener: StatusListener): () => void {
+    const channel = `jobs:status:${jobId}`;
+    
+    let channelListeners = this.listeners.get(channel);
+    if (!channelListeners) {
+      channelListeners = new Set();
+      this.listeners.set(channel, channelListeners);
+      ensureSubscribed(this.getSubscriber(), channel);
+    }
+    channelListeners.add(listener);
+
+    return () => {
+      const currentListeners = this.listeners.get(channel);
+      if (currentListeners) {
+        currentListeners.delete(listener);
+        if (currentListeners.size === 0) {
+          this.listeners.delete(channel);
+          this.subscriber?.unsubscribe(channel).catch((err) => {
+            console.error('RedisStorage: unsubscribe error', { channel, err });
+          });
+        }
+      }
+    };
+  }
+
   async close(): Promise<void> {
+    if (this.subscriber) {
+      await this.subscriber.quit();
+      this.subscriber = null;
+    }
+    this.listeners.clear();
     await this.redis.quit();
   }
 }

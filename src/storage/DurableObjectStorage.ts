@@ -1,4 +1,4 @@
-import type { Storage, StoredJobState, LockResult } from './Storage';
+import type { Storage, StoredJobState, LockResult, StatusListener } from './Storage';
 
 /**
  * SQLite cursor interface for iterating query results.
@@ -59,6 +59,7 @@ type JobResultRow = {
 export class DurableObjectStorage implements Storage {
   private readonly sql: SqlStorage;
   private initialized = false;
+  private readonly statusListeners = new Map<string, Set<StatusListener>>();
 
   constructor(ctx: DurableObjectState) {
     this.sql = ctx.storage.sql;
@@ -108,8 +109,23 @@ export class DurableObjectStorage implements Storage {
         now
       );
     }
-    // status is ignored - Durable Objects don't have pub/sub
-    // Use WebSocket hibernation API or polling for real-time updates
+    // Publish status to in-memory listeners
+    if (opts.status !== undefined) {
+      this.publishStatus(jobId, opts.status);
+    }
+  }
+
+  private publishStatus(jobId: string, status: unknown): void {
+    const listeners = this.statusListeners.get(jobId);
+    if (listeners) {
+      for (const listener of listeners) {
+        try {
+          listener(status);
+        } catch (err) {
+          console.error('DurableObjectStorage: listener error', { jobId, err });
+        }
+      }
+    }
   }
 
   async getState<T = unknown>(jobId: string): Promise<StoredJobState<T> | undefined> {
@@ -162,7 +178,10 @@ export class DurableObjectStorage implements Storage {
     
     this.sql.exec('DELETE FROM job_states WHERE job_id = ?', jobId);
     
-    // status is ignored - no pub/sub support
+    // Publish status to in-memory listeners
+    if (opts.status !== undefined) {
+      this.publishStatus(jobId, opts.status);
+    }
   }
 
   /**
@@ -214,8 +233,28 @@ export class DurableObjectStorage implements Storage {
     return cursor.rowsWritten;
   }
 
+  subscribe(jobId: string, listener: StatusListener): () => void {
+    let listeners = this.statusListeners.get(jobId);
+    if (!listeners) {
+      listeners = new Set();
+      this.statusListeners.set(jobId, listeners);
+    }
+    listeners.add(listener);
+
+    return () => {
+      const currentListeners = this.statusListeners.get(jobId);
+      if (currentListeners) {
+        currentListeners.delete(listener);
+        if (currentListeners.size === 0) {
+          this.statusListeners.delete(jobId);
+        }
+      }
+    };
+  }
+
   async close(): Promise<void> {
     // Durable Objects don't need explicit cleanup
     // The storage is managed by the runtime
+    this.statusListeners.clear();
   }
 }

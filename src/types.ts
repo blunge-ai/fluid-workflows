@@ -15,10 +15,8 @@ export type WfJobData<Input = unknown> = {
   input: Input,
 };
 
-export type WfProgressInfo = {
-  phase: string,
-  progress: number,
-};
+export type WfUpdateInfo = Record<string, unknown>;
+export type WfMeta = Record<string, unknown>;
 
 export function makeWorkflowJobData<Input = unknown>({ props, input }: { props: WorkflowProps, input: Input }) {
   return {
@@ -47,7 +45,7 @@ export type WorkflowRunOptions<WfInput, WfOutput, StepInput> = {
 };
 
 export type UpdateFn<StepInput>
-  = (opts: { input?: StepInput, progress?: WfProgressInfo }) => Promise<{ interrupt: boolean }>;
+  = (opts: { input?: StepInput, info?: WfUpdateInfo }) => Promise<{ interrupt: boolean }>;
 export type StepFn<Input, Output, WfInput, WfOutput>
   = (input: Input, runOpts: WorkflowRunOptions<WfInput, WfOutput, Input>) => Promise<Output>;
 
@@ -96,14 +94,14 @@ export interface Workflow<Input = unknown, Output = unknown, Names extends strin
     Record<string, Workflow<unknown, unknown, string, any, any>> |
     StepsChildren<any>
   >;
-  run(input: Input, opts?: RunOptions<unknown>): Promise<Output>;
+  run(input: Input, opts?: RunOptions<WfMeta>): Promise<Output>;
 }
 
 // ============================================================================
 // Runner Types
 // ============================================================================
 
-export type RunOptions<Meta> = {
+export type RunOptions<Meta extends WfMeta> = {
   jobId?: string,
   meta?: Meta,
 };
@@ -115,7 +113,7 @@ export interface Runner {
   run<Input, Output>(
     workflow: Workflow<Input, Output, any, any, any>,
     input: Input,
-    opts?: RunOptions<unknown>,
+    opts?: RunOptions<WfMeta>,
   ): Promise<Output>;
 }
 
