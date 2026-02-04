@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { WfJobData, Workflow, WfDispatcher, DispatchOptions } from '../types';
+import type { WfJobData, Workflow, WfDispatcher, DispatchOptions, WfMeta } from '../types';
 import { makeWorkflowJobData } from '../types';
 import { timeout } from '../utils';
 import { ValueOf, WfArray, NamesOfWfs } from '../typeHelpers';
@@ -40,7 +40,7 @@ export class WfJobQueueWorker<
       dispatch: async () => {
         throw new Error('dispatch() not supported in job queue worker');
       },
-      dispatchAwaitingOutput: async <N extends string, I, O, No, Co, Meta>(
+      dispatchAwaitingOutput: async <N extends string, I, O, No, Co, Meta extends WfMeta = WfMeta>(
         workflow: Workflow<I, O, N, No, Co>,
         input: I,
         dispatchOpts?: DispatchOptions<Meta>,

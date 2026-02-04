@@ -3,7 +3,7 @@ import type { WfArray, NamesOfWfs, MatchingWorkflow } from './typeHelpers';
 import type { Workflow, WfDispatcher } from './types';
 import { WfBuilder, findWorkflow, isRestartWrapper, isCompleteWrapper, withRestartWrapper, withCompleteWrapper, collectWorkflows, isStepsChildren } from './WfBuilder';
 import type { StepFn } from './types';
-import { makeWorkflowJobData, WfJobData, WfUpdateInfo } from './types';
+import { makeWorkflowJobData, WfJobData, WfUpdateInfo, WfStatus, WfMeta } from './types';
 import { defaultLogger } from './utils';
 import type { Logger } from './utils';
 import { JobResult } from './jobQueue/JobQueueEngine';
@@ -101,7 +101,7 @@ type RunOptions<Meta> = {
 export class WfRunner<
   const Wfs extends WfArray<string>,
 > {
-  private readonly storage: Storage;
+  private readonly storage: Storage<WfStatus>;
   private readonly allWorkflows: Workflow<unknown, unknown>[];
   private readonly logger: Logger;  
   private readonly jobTimeoutMs: number;
@@ -136,7 +136,7 @@ export class WfRunner<
        */
       resultTtlMs?: number,
       logger?: Logger,
-      storage?: Storage,
+      storage?: Storage<WfStatus>,
       dispatcher?: WfDispatcher<Wfs>,
     }
   ) {
@@ -158,7 +158,7 @@ export class WfRunner<
     input: unknown,
     parentJobId: string,
     stepIndex: number,
-    meta?: unknown,
+    meta?: WfMeta,
   ): Promise<Record<string, unknown>> {
     const entries = Object.entries(workflows);
     
@@ -199,7 +199,7 @@ export class WfRunner<
     return Object.fromEntries(results);
   }
 
-  private async runSteps<Input, Output, Meta, Info extends WfUpdateInfo>(
+  private async runSteps<Input, Output, Meta extends WfMeta>(
     workflow: Workflow<Input, Output>,
     jobId: string,
     jobData: WfJobData<Input>,
@@ -348,7 +348,7 @@ export class WfRunner<
     }
   }
 
-  private async runJob<Input, Output, Meta>(
+  private async runJob<Input, Output, Meta extends WfMeta>(
     workflow: Workflow<Input, Output>,
     input: Input,
     opts?: RunOptions<Meta>,
@@ -423,7 +423,7 @@ export class WfRunner<
   /**
    * Wait for the lock to be released, check for existing result, and retry if needed.
    */
-  private async waitAndRetry<Input, Output, Meta>(
+  private async waitAndRetry<Input, Output, Meta extends WfMeta = WfMeta>(
     workflow: Workflow<Input, Output>,
     input: Input,
     jobId: string,
@@ -451,7 +451,7 @@ export class WfRunner<
     return this.runJob(workflow, input, opts);
   }
 
-  async run<const N extends string, Input, Output, No, Co, Meta = unknown>(
+  async run<const N extends string, Input, Output, No, Co, Meta extends WfMeta = WfMeta>(
     props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, NamesOfWfs<Wfs>, Input, Output, No, Co>,
     input: Input,
     opts?: RunOptions<Meta>,
@@ -470,7 +470,7 @@ export class WfRunner<
    * @throws Error if workflow not registered
    * @throws LockAcquisitionError if lock cannot be acquired (when noLock is false)
    */
-   async resume<Output, Meta = unknown>(
+   async resume<Output, Meta extends WfMeta = WfMeta>(
     jobId: string,
     jobData: WfJobData<unknown>,
     opts?: { meta?: Meta, noLock?: boolean, autoRefreshLock?: boolean },
@@ -534,7 +534,7 @@ export class WfRunner<
    * @param listener - Callback invoked when status is published
    * @returns Unsubscribe function
    */
-  subscribe(jobId: string, listener: StatusListener): () => void {
+  subscribe(jobId: string, listener: StatusListener<WfStatus>): () => void {
     return this.storage.subscribe(jobId, listener);
   }
 }

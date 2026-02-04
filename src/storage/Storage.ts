@@ -38,7 +38,7 @@ export type LockLogger = {
  * Options for withLock helper.
  */
 export type WithLockOptions = {
-  storage: Storage;
+  storage: Storage<unknown>;
   jobId: string;
   lockTimeoutMs: number;
   lockRefreshIntervalMs: number;
@@ -116,12 +116,12 @@ export async function withLock<T>(
 /**
  * Callback for status subscription events.
  */
-export type StatusListener = (status: unknown) => void;
+export type StatusListener<Status = unknown> = (status: Status) => void;
 
 /**
  * Storage interface for workflow state persistence and pub/sub.
  */
-export interface Storage {
+export interface Storage<Status = unknown> {
   /**
    * Attempt to acquire a lock for a job.
    * Returns a token if acquired, which must be passed to unlock.
@@ -156,7 +156,7 @@ export interface Storage {
    */
   updateState(jobId: string, opts: {
     state?: unknown,
-    status?: unknown,
+    status?: Status,
     ttlMs: number,
     refreshLock?: { token: string, timeoutMs: number },
   }): Promise<void>;
@@ -178,7 +178,7 @@ export interface Storage {
    * @param opts.ttlMs - Result expiration time in milliseconds
    * @param opts.status - Optional status to publish
    */
-  setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: unknown }): Promise<void>;
+  setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: Status }): Promise<void>;
 
   /**
    * Get the result for a job, or undefined if not found.
@@ -206,7 +206,7 @@ export interface Storage {
    * @param listener - Callback invoked when status is published
    * @returns Unsubscribe function
    */
-  subscribe(jobId: string, listener: StatusListener): () => void;
+  subscribe(jobId: string, listener: StatusListener<Status>): () => void;
 
   /**
    * Close the storage connection.

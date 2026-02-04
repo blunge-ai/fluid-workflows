@@ -21,20 +21,20 @@ export type { DurableObjectState, DurableObjectStorageAPI, SqlStorage, SqlStorag
  * const storage = getDefaultStorage();
  * ```
  */
-let defaultStorageFactory: () => Storage = () => new MemoryStorage();
+let defaultStorageFactory: () => Storage<any> = () => new MemoryStorage();
 
 /**
  * Set the default storage factory. Call this before any tests run
  * to override the storage implementation globally.
  */
-export function setDefaultStorageFactory(factory: () => Storage): void {
+export function setDefaultStorageFactory(factory: () => Storage<any>): void {
   defaultStorageFactory = factory;
 }
 
 /**
  * Get a new storage instance from the default factory.
  */
-export function getDefaultStorage(): Storage {
+export function getDefaultStorage(): Storage<any> {
   return defaultStorageFactory();
 }
 

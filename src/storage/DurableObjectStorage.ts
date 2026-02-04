@@ -56,10 +56,10 @@ type JobResultRow = {
  * Note: Pub/sub is not supported in Durable Objects - status updates are ignored.
  * For real-time updates, consider using WebSocket hibernation API or polling.
  */
-export class DurableObjectStorage implements Storage {
+export class DurableObjectStorage<Status = unknown> implements Storage<Status> {
   private readonly sql: SqlStorage;
   private initialized = false;
-  private readonly statusListeners = new Map<string, Set<StatusListener>>();
+  private readonly statusListeners = new Map<string, Set<StatusListener<Status>>>();
 
   constructor(ctx: DurableObjectState) {
     this.sql = ctx.storage.sql;
@@ -89,7 +89,7 @@ export class DurableObjectStorage implements Storage {
 
   async updateState(jobId: string, opts: {
     state?: unknown;
-    status?: unknown;
+    status?: Status;
     ttlMs: number;
   }): Promise<void> {
     this.ensureInitialized();
@@ -115,7 +115,7 @@ export class DurableObjectStorage implements Storage {
     }
   }
 
-  private publishStatus(jobId: string, status: unknown): void {
+  private publishStatus(jobId: string, status: Status): void {
     const listeners = this.statusListeners.get(jobId);
     if (listeners) {
       for (const listener of listeners) {
@@ -160,7 +160,7 @@ export class DurableObjectStorage implements Storage {
     }));
   }
 
-  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: unknown }): Promise<void> {
+  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: Status }): Promise<void> {
     this.ensureInitialized();
     
     const resultJson = JSON.stringify(result);
@@ -233,7 +233,7 @@ export class DurableObjectStorage implements Storage {
     return cursor.rowsWritten;
   }
 
-  subscribe(jobId: string, listener: StatusListener): () => void {
+  subscribe(jobId: string, listener: StatusListener<Status>): () => void {
     let listeners = this.statusListeners.get(jobId);
     if (!listeners) {
       listeners = new Set();

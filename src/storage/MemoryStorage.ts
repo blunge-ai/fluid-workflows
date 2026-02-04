@@ -21,16 +21,16 @@ type LockWaiter = {
   timeoutId: ReturnType<typeof setTimeout>,
 };
 
-export class MemoryStorage implements Storage {
+export class MemoryStorage<Status = unknown> implements Storage<Status> {
   private readonly states = new Map<string, StoredEntry>();
   private readonly results = new Map<string, ResultEntry>();
   private readonly locks = new Map<string, LockEntry>();
   private readonly lockWaiters = new Map<string, Set<LockWaiter>>();
-  private readonly statusListeners = new Map<string, Set<StatusListener>>();
+  private readonly statusListeners = new Map<string, Set<StatusListener<Status>>>();
 
   async updateState(jobId: string, opts: {
     state?: unknown,
-    status?: unknown,
+    status?: Status,
     ttlMs: number,
     refreshLock?: { token: string, timeoutMs: number },
   }): Promise<void> {
@@ -53,7 +53,7 @@ export class MemoryStorage implements Storage {
     }
   }
 
-  private publishStatus(jobId: string, status: unknown): void {
+  private publishStatus(jobId: string, status: Status): void {
     const listeners = this.statusListeners.get(jobId);
     if (listeners) {
       for (const listener of listeners) {
@@ -86,7 +86,7 @@ export class MemoryStorage implements Storage {
     return entries;
   }
 
-  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: unknown }): Promise<void> {
+  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: Status }): Promise<void> {
     this.results.set(jobId, {
       result,
       expiresAt: Date.now() + opts.ttlMs,
@@ -99,7 +99,7 @@ export class MemoryStorage implements Storage {
     }
   }
 
-  subscribe(jobId: string, listener: StatusListener): () => void {
+  subscribe(jobId: string, listener: StatusListener<Status>): () => void {
     let listeners = this.statusListeners.get(jobId);
     if (!listeners) {
       listeners = new Set();

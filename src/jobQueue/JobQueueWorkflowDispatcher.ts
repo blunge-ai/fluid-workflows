@@ -6,7 +6,7 @@ import { isResultStatus } from './JobQueueEngine';
 import { Logger, assert } from '../utils';
 import { WfArray, NamesOfWfs, MatchingWorkflow } from '../typeHelpers';
 import { JobQueueConfig } from './JobQueueConfig';
-import type { WfDispatcher, DispatchOptions } from '../types';
+import type { WfDispatcher, DispatchOptions, WfMeta } from '../types';
 
 export type Opts = {
   logger: Logger,
@@ -25,7 +25,7 @@ export class JobQueueWorkflowDispatcher<
 > implements JobQueueWorkflowDispatcherInterface<Wfs, Qs> {
   constructor(public readonly config: JobQueueConfig<Wfs, Qs>) {}
 
-  async dispatch<N extends string, Input, Output, No, Co, Meta = unknown>(
+  async dispatch<N extends string, Input, Output, No, Co, Meta extends WfMeta = WfMeta>(
     props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, NamesOfWfs<Wfs>, Input, Output, No, Co>,
     input: Input,
     opts?: DispatchOptions<Meta>,
@@ -43,7 +43,7 @@ export class JobQueueWorkflowDispatcher<
     });
   }
   
-  async dispatchAwaitingOutput<const N extends string, Input, Output, No, Co, Meta = unknown>(
+  async dispatchAwaitingOutput<const N extends string, Input, Output, No, Co, Meta extends WfMeta = WfMeta>(
     props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, NamesOfWfs<Wfs>, Input, Output, No, Co>,
     input: Input,
     opts?: DispatchOptions<Meta>,

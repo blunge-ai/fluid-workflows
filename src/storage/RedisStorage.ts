@@ -72,10 +72,10 @@ async function ensureSubscribed(
   }
 }
 
-export class RedisStorage implements Storage {
+export class RedisStorage<Status = unknown> implements Storage<Status> {
   private readonly redis: Redis;
   private subscriber: Redis | null = null;
-  private readonly listeners = new Map<string, Set<StatusListener>>();
+  private readonly listeners = new Map<string, Set<StatusListener<Status>>>();
 
   constructor(private readonly redisConnection: () => Redis = defaultRedisConnection) {
     this.redis = redisConnection();
@@ -104,7 +104,7 @@ export class RedisStorage implements Storage {
 
   async updateState(jobId: string, opts: {
     state?: unknown,
-    status?: unknown,
+    status?: Status,
     ttlMs: number,
     refreshLock?: { token: string, timeoutMs: number },
   }): Promise<void> {
@@ -177,7 +177,7 @@ export class RedisStorage implements Storage {
     return activeJobs;
   }
 
-  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: unknown }): Promise<void> {
+  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: Status }): Promise<void> {
     const multi = this.redis.multi();
     multi.set(`jobs:result:${jobId}`, pack(result), 'PX', opts.ttlMs);
     // Remove from active jobs set
@@ -268,7 +268,7 @@ export class RedisStorage implements Storage {
     return expiredJobIds.length;
   }
 
-  subscribe(jobId: string, listener: StatusListener): () => void {
+  subscribe(jobId: string, listener: StatusListener<Status>): () => void {
     const channel = `jobs:status:${jobId}`;
     
     let channelListeners = this.listeners.get(channel);

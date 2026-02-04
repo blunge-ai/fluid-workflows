@@ -18,6 +18,36 @@ export type WfJobData<Input = unknown> = {
 export type WfUpdateInfo = Record<string, unknown>;
 export type WfMeta = Record<string, unknown>;
 
+// ============================================================================
+// Workflow Status Types (for pub/sub)
+// ============================================================================
+
+export type WfStatusActive<Meta extends WfMeta = WfMeta, Info extends WfUpdateInfo = WfUpdateInfo> = {
+  type: 'active';
+  jobId: string;
+  meta?: Meta;
+  info: Info;
+};
+
+export type WfStatusSuccess<Meta extends WfMeta = WfMeta> = {
+  type: 'success';
+  jobId: string;
+  meta?: Meta;
+  resultKey: string;
+};
+
+export type WfStatusError<Meta extends WfMeta = WfMeta> = {
+  type: 'error';
+  jobId: string;
+  meta?: Meta;
+  reason: string;
+};
+
+export type WfStatus<Meta extends WfMeta = WfMeta, Info extends WfUpdateInfo = WfUpdateInfo> =
+  | WfStatusActive<Meta, Info>
+  | WfStatusSuccess<Meta>
+  | WfStatusError<Meta>;
+
 export function makeWorkflowJobData<Input = unknown>({ props, input }: { props: WorkflowProps, input: Input }) {
   return {
     name: props.name,
@@ -121,7 +151,7 @@ export interface Runner {
 // Dispatcher Types
 // ============================================================================
 
-export type DispatchOptions<Meta> = {
+export type DispatchOptions<Meta extends WfMeta> = {
   jobId?: string,
   meta?: Meta,
 };
@@ -129,13 +159,13 @@ export type DispatchOptions<Meta> = {
 export interface WfDispatcher<
   Wfs extends WfArray<string>
 > {
-  dispatch<N extends string, Input, Output, No, Co, Meta = unknown>(
+  dispatch<N extends string, Input, Output, No, Co, Meta extends WfMeta = WfMeta>(
     props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, NamesOfWfs<Wfs>, Input, Output, No, Co>,
     input: Input,
     opts?: DispatchOptions<Meta>,
   ): Promise<void>;
 
-  dispatchAwaitingOutput<N extends string, Input, Output, No, Co, Meta = unknown>(
+  dispatchAwaitingOutput<N extends string, Input, Output, No, Co, Meta extends WfMeta = WfMeta>(
     props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, NamesOfWfs<Wfs>, Input, Output, No, Co>,
     input: Input,
     opts?: DispatchOptions<Meta>,

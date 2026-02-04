@@ -5,13 +5,13 @@ import { MemoryStorage } from './MemoryStorage';
  * Default storage instance used by tests and when no storage is explicitly provided.
  * Override this in test setup to use a different storage implementation.
  */
-export let defaultStorage: Storage = new MemoryStorage();
+export let defaultStorage: Storage<any> = new MemoryStorage();
 
 /**
  * Set the default storage instance.
  * Call this in test setup to override the storage implementation.
  */
-export function setDefaultStorage(storage: Storage): void {
+export function setDefaultStorage(storage: Storage<any>): void {
   defaultStorage = storage;
 }
 
