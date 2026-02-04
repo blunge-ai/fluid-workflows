@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { Storage, StoredJobState, LockResult, StatusListener } from './Storage';
+import type { WfMeta, WfUpdateInfo, WfStatus } from '../types';
 
 type StoredEntry = {
   state: unknown,
@@ -21,16 +22,16 @@ type LockWaiter = {
   timeoutId: ReturnType<typeof setTimeout>,
 };
 
-export class MemoryStorage<Status = unknown> implements Storage<Status> {
+export class MemoryStorage<Meta extends WfMeta = WfMeta, Info extends WfUpdateInfo = WfUpdateInfo> implements Storage<Meta, Info> {
   private readonly states = new Map<string, StoredEntry>();
   private readonly results = new Map<string, ResultEntry>();
   private readonly locks = new Map<string, LockEntry>();
   private readonly lockWaiters = new Map<string, Set<LockWaiter>>();
-  private readonly statusListeners = new Map<string, Set<StatusListener<Status>>>();
+  private readonly statusListeners = new Map<string, Set<StatusListener<Meta, Info>>>();
 
   async updateState(jobId: string, opts: {
     state?: unknown,
-    status?: Status,
+    status?: WfStatus<Meta, Info>,
     ttlMs: number,
     refreshLock?: { token: string, timeoutMs: number },
   }): Promise<void> {
@@ -53,7 +54,7 @@ export class MemoryStorage<Status = unknown> implements Storage<Status> {
     }
   }
 
-  private publishStatus(jobId: string, status: Status): void {
+  private publishStatus(jobId: string, status: WfStatus<Meta, Info>): void {
     const listeners = this.statusListeners.get(jobId);
     if (listeners) {
       for (const listener of listeners) {
@@ -86,7 +87,7 @@ export class MemoryStorage<Status = unknown> implements Storage<Status> {
     return entries;
   }
 
-  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: Status }): Promise<void> {
+  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: WfStatus<Meta, Info> }): Promise<void> {
     this.results.set(jobId, {
       result,
       expiresAt: Date.now() + opts.ttlMs,
@@ -99,7 +100,7 @@ export class MemoryStorage<Status = unknown> implements Storage<Status> {
     }
   }
 
-  subscribe(jobId: string, listener: StatusListener<Status>): () => void {
+  subscribe(jobId: string, listener: StatusListener<Meta, Info>): () => void {
     let listeners = this.statusListeners.get(jobId);
     if (!listeners) {
       listeners = new Set();

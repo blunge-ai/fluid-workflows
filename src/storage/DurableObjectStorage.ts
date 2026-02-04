@@ -1,4 +1,5 @@
 import type { Storage, StoredJobState, LockResult, StatusListener } from './Storage';
+import type { WfMeta, WfUpdateInfo, WfStatus } from '../types';
 
 /**
  * SQLite cursor interface for iterating query results.
@@ -56,10 +57,10 @@ type JobResultRow = {
  * Note: Pub/sub is not supported in Durable Objects - status updates are ignored.
  * For real-time updates, consider using WebSocket hibernation API or polling.
  */
-export class DurableObjectStorage<Status = unknown> implements Storage<Status> {
+export class DurableObjectStorage<Meta extends WfMeta = WfMeta, Info extends WfUpdateInfo = WfUpdateInfo> implements Storage<Meta, Info> {
   private readonly sql: SqlStorage;
   private initialized = false;
-  private readonly statusListeners = new Map<string, Set<StatusListener<Status>>>();
+  private readonly statusListeners = new Map<string, Set<StatusListener<Meta, Info>>>();
 
   constructor(ctx: DurableObjectState) {
     this.sql = ctx.storage.sql;
@@ -89,8 +90,9 @@ export class DurableObjectStorage<Status = unknown> implements Storage<Status> {
 
   async updateState(jobId: string, opts: {
     state?: unknown;
-    status?: Status;
+    status?: WfStatus<Meta, Info>;
     ttlMs: number;
+    refreshLock?: { token: string, timeoutMs: number };
   }): Promise<void> {
     this.ensureInitialized();
     
@@ -115,7 +117,7 @@ export class DurableObjectStorage<Status = unknown> implements Storage<Status> {
     }
   }
 
-  private publishStatus(jobId: string, status: Status): void {
+  private publishStatus(jobId: string, status: WfStatus<Meta, Info>): void {
     const listeners = this.statusListeners.get(jobId);
     if (listeners) {
       for (const listener of listeners) {
@@ -160,7 +162,7 @@ export class DurableObjectStorage<Status = unknown> implements Storage<Status> {
     }));
   }
 
-  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: Status }): Promise<void> {
+  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: WfStatus<Meta, Info> }): Promise<void> {
     this.ensureInitialized();
     
     const resultJson = JSON.stringify(result);
@@ -233,7 +235,7 @@ export class DurableObjectStorage<Status = unknown> implements Storage<Status> {
     return cursor.rowsWritten;
   }
 
-  subscribe(jobId: string, listener: StatusListener<Status>): () => void {
+  subscribe(jobId: string, listener: StatusListener<Meta, Info>): () => void {
     let listeners = this.statusListeners.get(jobId);
     if (!listeners) {
       listeners = new Set();

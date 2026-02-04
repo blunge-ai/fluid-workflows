@@ -1,7 +1,7 @@
 import type { Storage } from './Storage';
 import { MemoryStorage } from './MemoryStorage';
 
-export type { Storage, StoredJobState, LockResult } from './Storage';
+export type { Storage, StoredJobState, LockResult, StatusListener } from './Storage';
 export { MemoryStorage } from './MemoryStorage';
 export { RedisStorage } from './RedisStorage';
 export { DurableObjectStorage } from './DurableObjectStorage';
@@ -21,20 +21,20 @@ export type { DurableObjectState, DurableObjectStorageAPI, SqlStorage, SqlStorag
  * const storage = getDefaultStorage();
  * ```
  */
-let defaultStorageFactory: () => Storage<any> = () => new MemoryStorage();
+let defaultStorageFactory: () => Storage<any, any> = () => new MemoryStorage();
 
 /**
  * Set the default storage factory. Call this before any tests run
  * to override the storage implementation globally.
  */
-export function setDefaultStorageFactory(factory: () => Storage<any>): void {
+export function setDefaultStorageFactory(factory: () => Storage<any, any>): void {
   defaultStorageFactory = factory;
 }
 
 /**
  * Get a new storage instance from the default factory.
  */
-export function getDefaultStorage(): Storage<any> {
+export function getDefaultStorage(): Storage<any, any> {
   return defaultStorageFactory();
 }
 

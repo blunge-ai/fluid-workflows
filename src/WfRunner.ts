@@ -103,7 +103,7 @@ export class WfRunner<
   Meta extends WfMeta = WfMeta,
   Info extends WfUpdateInfo = WfUpdateInfo,
 > {
-  private readonly storage: Storage<WfStatus<Meta, Info>>;
+  private readonly storage: Storage<Meta, Info>;
   private readonly allWorkflows: Workflow<unknown, unknown>[];
   private readonly logger: Logger;  
   private readonly jobTimeoutMs: number;
@@ -138,11 +138,11 @@ export class WfRunner<
        */
       resultTtlMs?: number,
       logger?: Logger,
-      storage?: Storage<WfStatus<Meta, Info>>,
+      storage?: Storage<Meta, Info>,
       dispatcher?: WfDispatcher<Wfs>,
     }
   ) {
-    this.storage = opts.storage ?? new MemoryStorage() as Storage<WfStatus<Meta, Info>>;
+    this.storage = opts.storage ?? new MemoryStorage<Meta, Info>();
     this.logger = opts.logger ?? defaultLogger;
     this.allWorkflows = collectWorkflows(opts.workflows as unknown as Workflow<unknown, unknown>[]);
     this.jobTimeoutMs = opts.jobTimeoutMs;
@@ -536,7 +536,7 @@ export class WfRunner<
    * @param listener - Callback invoked when status is published
    * @returns Unsubscribe function
    */
-  subscribe(jobId: string, listener: StatusListener<WfStatus<Meta, Info>>): () => void {
+  subscribe(jobId: string, listener: StatusListener<Meta, Info>): () => void {
     return this.storage.subscribe(jobId, listener);
   }
 }

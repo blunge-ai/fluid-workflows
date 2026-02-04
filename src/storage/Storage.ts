@@ -1,3 +1,5 @@
+import { WfMeta, WfStatus, WfUpdateInfo } from "~/types";
+
 /**
  * Stored job state with metadata.
  */
@@ -38,7 +40,7 @@ export type LockLogger = {
  * Options for withLock helper.
  */
 export type WithLockOptions = {
-  storage: Storage<unknown>;
+  storage: Storage<any, any>;
   jobId: string;
   lockTimeoutMs: number;
   lockRefreshIntervalMs: number;
@@ -116,12 +118,14 @@ export async function withLock<T>(
 /**
  * Callback for status subscription events.
  */
-export type StatusListener<Status = unknown> = (status: Status) => void;
+export type StatusListener<Meta extends WfMeta = WfMeta, Info extends WfUpdateInfo = WfUpdateInfo> = (status: WfStatus<Meta, Info>) => void;
 
 /**
  * Storage interface for workflow state persistence and pub/sub.
+ * @typeParam Meta - Metadata type for workflow status
+ * @typeParam Info - Update info type for workflow status
  */
-export interface Storage<Status = unknown> {
+export interface Storage<Meta extends WfMeta = WfMeta, Info extends WfUpdateInfo = WfUpdateInfo> {
   /**
    * Attempt to acquire a lock for a job.
    * Returns a token if acquired, which must be passed to unlock.
@@ -156,7 +160,7 @@ export interface Storage<Status = unknown> {
    */
   updateState(jobId: string, opts: {
     state?: unknown,
-    status?: Status,
+    status?: WfStatus<Meta, Info>,
     ttlMs: number,
     refreshLock?: { token: string, timeoutMs: number },
   }): Promise<void>;
@@ -178,7 +182,7 @@ export interface Storage<Status = unknown> {
    * @param opts.ttlMs - Result expiration time in milliseconds
    * @param opts.status - Optional status to publish
    */
-  setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: Status }): Promise<void>;
+  setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: WfStatus<Meta, Info> }): Promise<void>;
 
   /**
    * Get the result for a job, or undefined if not found.
@@ -206,7 +210,7 @@ export interface Storage<Status = unknown> {
    * @param listener - Callback invoked when status is published
    * @returns Unsubscribe function
    */
-  subscribe(jobId: string, listener: StatusListener<Status>): () => void;
+  subscribe(jobId: string, listener: StatusListener<Meta, Info>): () => void;
 
   /**
    * Close the storage connection.

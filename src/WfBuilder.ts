@@ -9,7 +9,6 @@ import type {
   StripCtrl,
   WfMeta,
   WfUpdateInfo,
-  WfStatus,
 } from './types';
 import {
   StepsChildren,
@@ -99,7 +98,7 @@ export class WfBuilder<Input = Unset, Output = never, const Names extends string
 
   async subscribe<Meta extends WfMeta = WfMeta, Info extends WfUpdateInfo = WfUpdateInfo>(
     jobId: string, 
-    listener: StatusListener<WfStatus<Meta, Info>>
+    listener: StatusListener<Meta, Info>
   ): Promise<() => void> {
     const runner = await this.getRunner();
     return (runner as any).subscribe(jobId, listener);

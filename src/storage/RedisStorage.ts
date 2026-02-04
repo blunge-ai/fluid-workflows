@@ -4,6 +4,7 @@ import type { Storage, StoredJobState, LockResult, StatusListener } from './Stor
 import { pack, unpack } from '../utils/packer';
 import { defaultRedisConnection } from '../utils/redis';
 import { chunk, timeout } from '~/utils';
+import type { WfMeta, WfUpdateInfo, WfStatus } from '../types';
 
 const ACTIVE_JOBS_KEY = 'jobs:active';
 const DEFAULT_BATCH_SIZE = 100;
@@ -72,10 +73,10 @@ async function ensureSubscribed(
   }
 }
 
-export class RedisStorage<Status = unknown> implements Storage<Status> {
+export class RedisStorage<Meta extends WfMeta = WfMeta, Info extends WfUpdateInfo = WfUpdateInfo> implements Storage<Meta, Info> {
   private readonly redis: Redis;
   private subscriber: Redis | null = null;
-  private readonly listeners = new Map<string, Set<StatusListener<Status>>>();
+  private readonly listeners = new Map<string, Set<StatusListener<Meta, Info>>>();
 
   constructor(private readonly redisConnection: () => Redis = defaultRedisConnection) {
     this.redis = redisConnection();
@@ -104,7 +105,7 @@ export class RedisStorage<Status = unknown> implements Storage<Status> {
 
   async updateState(jobId: string, opts: {
     state?: unknown,
-    status?: Status,
+    status?: WfStatus<Meta, Info>,
     ttlMs: number,
     refreshLock?: { token: string, timeoutMs: number },
   }): Promise<void> {
@@ -177,7 +178,7 @@ export class RedisStorage<Status = unknown> implements Storage<Status> {
     return activeJobs;
   }
 
-  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: Status }): Promise<void> {
+  async setResult(jobId: string, result: unknown, opts: { ttlMs: number, status?: WfStatus<Meta, Info> }): Promise<void> {
     const multi = this.redis.multi();
     multi.set(`jobs:result:${jobId}`, pack(result), 'PX', opts.ttlMs);
     // Remove from active jobs set
@@ -268,7 +269,7 @@ export class RedisStorage<Status = unknown> implements Storage<Status> {
     return expiredJobIds.length;
   }
 
-  subscribe(jobId: string, listener: StatusListener<Status>): () => void {
+  subscribe(jobId: string, listener: StatusListener<Meta, Info>): () => void {
     const channel = `jobs:status:${jobId}`;
     
     let channelListeners = this.listeners.get(channel);
