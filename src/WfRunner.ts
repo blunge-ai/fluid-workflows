@@ -100,8 +100,10 @@ type RunOptions<Meta> = {
 
 export class WfRunner<
   const Wfs extends WfArray<string>,
+  Meta extends WfMeta = WfMeta,
+  Info extends WfUpdateInfo = WfUpdateInfo,
 > {
-  private readonly storage: Storage<WfStatus>;
+  private readonly storage: Storage<WfStatus<Meta, Info>>;
   private readonly allWorkflows: Workflow<unknown, unknown>[];
   private readonly logger: Logger;  
   private readonly jobTimeoutMs: number;
@@ -136,11 +138,11 @@ export class WfRunner<
        */
       resultTtlMs?: number,
       logger?: Logger,
-      storage?: Storage<WfStatus>,
+      storage?: Storage<WfStatus<Meta, Info>>,
       dispatcher?: WfDispatcher<Wfs>,
     }
   ) {
-    this.storage = opts.storage ?? new MemoryStorage();
+    this.storage = opts.storage ?? new MemoryStorage() as Storage<WfStatus<Meta, Info>>;
     this.logger = opts.logger ?? defaultLogger;
     this.allWorkflows = collectWorkflows(opts.workflows as unknown as Workflow<unknown, unknown>[]);
     this.jobTimeoutMs = opts.jobTimeoutMs;
@@ -158,7 +160,7 @@ export class WfRunner<
     input: unknown,
     parentJobId: string,
     stepIndex: number,
-    meta?: WfMeta,
+    meta?: Meta,
   ): Promise<Record<string, unknown>> {
     const entries = Object.entries(workflows);
     
@@ -199,7 +201,7 @@ export class WfRunner<
     return Object.fromEntries(results);
   }
 
-  private async runSteps<Input, Output, Meta extends WfMeta>(
+  private async runSteps<Input, Output>(
     workflow: Workflow<Input, Output>,
     jobId: string,
     jobData: WfJobData<Input>,
@@ -216,10 +218,10 @@ export class WfRunner<
     const refreshLock = opts?.lockCtx ? { token: opts.lockCtx.token, timeoutMs: opts.lockCtx.timeoutMs } : undefined;
 
     const runOptions = {
-      update: async (updateOpts: { input?: unknown, info?: WfUpdateInfo }) => {
-        const status = (
+      update: async (updateOpts: { input?: unknown, info?: Info }) => {
+        const status: WfStatus<Meta, Info> | undefined = (
           updateOpts.info
-            ? { type: 'active', jobId, meta: opts?.meta as Meta, info: updateOpts.info } as const
+            ? { type: 'active', jobId, meta: opts?.meta, info: updateOpts.info }
             : undefined
         );
         const hasInput = 'input' in updateOpts;
@@ -261,7 +263,7 @@ export class WfRunner<
             if (workflow.outputSchema) {
               output = workflow.outputSchema.parse(output) as Output;
             }
-            const status = { type: 'success', jobId, meta: opts?.meta as Meta, resultKey: jobId } as const;
+            const status: WfStatus<Meta, Info> = { type: 'success', jobId, meta: opts?.meta, resultKey: jobId };
             await this.storage.setResult(jobId, { type: 'success', output } as JobResult<Output>, { ttlMs: this.resultTtlMs, status });
             return output;
           }
@@ -280,7 +282,7 @@ export class WfRunner<
 
           // Run functions in parallel
           const fnOutputsPromise = Promise.all(fnEntries.map(async ([key, fn]) => {
-            const fnOut = await fn(result, runOptions);
+            const fnOut = await fn(result, runOptions as any);
             if (isRestartWrapper(fnOut)) {
               this.logger.error({ jobId, key }, 'restart() not supported inside parallel()');
               throw new Error('restart() not supported inside parallel()');
@@ -331,7 +333,7 @@ export class WfRunner<
       if (workflow.outputSchema) {
         output = workflow.outputSchema.parse(output) as Output;
       }
-      const status = { type: 'success', jobId, meta: opts?.meta, resultKey: jobId } as const;
+      const status: WfStatus<Meta, Info> = { type: 'success', jobId, meta: opts?.meta, resultKey: jobId };
       await this.storage.setResult(jobId, { type: 'success', output } as JobResult<Output>, { ttlMs: this.resultTtlMs, status });
       return output;
     } catch (err) {
@@ -342,13 +344,13 @@ export class WfRunner<
       }
       const reason = `exception when running workflow: ${String(err)}`;
       this.logger.error({ name: workflow.name, version: workflow.version, meta: opts?.meta, jobId, reason, err }, 'workflow error');
-      const status = { type: 'error', jobId, meta: opts?.meta, reason } as const;
+      const status: WfStatus<Meta, Info> = { type: 'error', jobId, meta: opts?.meta, reason };
       await this.storage.setResult(jobId, { type: 'error', reason } as JobResult<Output>, { ttlMs: this.resultTtlMs, status });
       throw err;
     }
   }
 
-  private async runJob<Input, Output, Meta extends WfMeta>(
+  private async runJob<Input, Output>(
     workflow: Workflow<Input, Output>,
     input: Input,
     opts?: RunOptions<Meta>,
@@ -414,7 +416,7 @@ export class WfRunner<
         this.logger.error({ jobId }, 'lock not acquired (nonBlocking)');
         throw new LockAcquisitionError(jobId);
       }
-      return this.waitAndRetry<Input, Output, Meta>(workflow, input, jobId, opts);
+      return this.waitAndRetry<Input, Output>(workflow, input, jobId, opts);
     }
 
     return lockResult.result;
@@ -423,7 +425,7 @@ export class WfRunner<
   /**
    * Wait for the lock to be released, check for existing result, and retry if needed.
    */
-  private async waitAndRetry<Input, Output, Meta extends WfMeta = WfMeta>(
+  private async waitAndRetry<Input, Output>(
     workflow: Workflow<Input, Output>,
     input: Input,
     jobId: string,
@@ -451,7 +453,7 @@ export class WfRunner<
     return this.runJob(workflow, input, opts);
   }
 
-  async run<const N extends string, Input, Output, No, Co, Meta extends WfMeta = WfMeta>(
+  async run<const N extends string, Input, Output, No, Co>(
     props: MatchingWorkflow<Workflow<Input, Output, N, No, Co>, NamesOfWfs<Wfs>, Input, Output, No, Co>,
     input: Input,
     opts?: RunOptions<Meta>,
@@ -470,7 +472,7 @@ export class WfRunner<
    * @throws Error if workflow not registered
    * @throws LockAcquisitionError if lock cannot be acquired (when noLock is false)
    */
-   async resume<Output, Meta extends WfMeta = WfMeta>(
+   async resume<Output>(
     jobId: string,
     jobData: WfJobData<unknown>,
     opts?: { meta?: Meta, noLock?: boolean, autoRefreshLock?: boolean },
@@ -534,7 +536,7 @@ export class WfRunner<
    * @param listener - Callback invoked when status is published
    * @returns Unsubscribe function
    */
-  subscribe(jobId: string, listener: StatusListener<WfStatus>): () => void {
+  subscribe(jobId: string, listener: StatusListener<WfStatus<Meta, Info>>): () => void {
     return this.storage.subscribe(jobId, listener);
   }
 }

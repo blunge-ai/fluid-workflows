@@ -8,6 +8,8 @@ import type {
   RunOptions,
   StripCtrl,
   WfMeta,
+  WfUpdateInfo,
+  WfStatus,
 } from './types';
 import {
   StepsChildren,
@@ -90,14 +92,17 @@ export class WfBuilder<Input = Unset, Output = never, const Names extends string
     return runner;
   }
 
-  async run(input: Input, opts?: RunOptions<WfMeta>): Promise<Output> {
+  async run<Meta extends WfMeta = WfMeta>(input: Input, opts?: RunOptions<Meta>): Promise<Output> {
     const runner = await this.getRunner();
     return runner.run(this, input, opts) as Promise<Output>;
   }
 
-  async subscribe(jobId: string, listener: StatusListener): Promise<() => void> {
+  async subscribe<Meta extends WfMeta = WfMeta, Info extends WfUpdateInfo = WfUpdateInfo>(
+    jobId: string, 
+    listener: StatusListener<WfStatus<Meta, Info>>
+  ): Promise<() => void> {
     const runner = await this.getRunner();
-    return (runner as WfRunner<any>).subscribe(jobId, listener);
+    return (runner as any).subscribe(jobId, listener);
   }
 
   // .step(workflow) - first step with child workflow

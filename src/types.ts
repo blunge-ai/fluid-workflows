@@ -68,16 +68,16 @@ export type WorkflowProps<Name extends string = string> = {
   numSteps: number,
 };
 
-export type WorkflowRunOptions<WfInput, WfOutput, StepInput> = {
-  update: UpdateFn<StepInput>,
+export type WorkflowRunOptions<WfInput, WfOutput, StepInput, Info extends WfUpdateInfo = WfUpdateInfo> = {
+  update: UpdateFn<StepInput, Info>,
   restart: RestartFn<WfInput>,
   complete: CompleteFn<WfOutput>,
 };
 
-export type UpdateFn<StepInput>
-  = (opts: { input?: StepInput, info?: WfUpdateInfo }) => Promise<{ interrupt: boolean }>;
-export type StepFn<Input, Output, WfInput, WfOutput>
-  = (input: Input, runOpts: WorkflowRunOptions<WfInput, WfOutput, Input>) => Promise<Output>;
+export type UpdateFn<StepInput, Info extends WfUpdateInfo = WfUpdateInfo>
+  = (opts: { input?: StepInput, info?: Info }) => Promise<{ interrupt: boolean }>;
+export type StepFn<Input, Output, WfInput, WfOutput, Info extends WfUpdateInfo = WfUpdateInfo>
+  = (input: Input, runOpts: WorkflowRunOptions<WfInput, WfOutput, Input, Info>) => Promise<Output>;
 
 export type WorkflowNames<W>
   = W extends Workflow<any, any, infer N, any, any> ? N : never;
