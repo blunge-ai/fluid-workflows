@@ -26,6 +26,8 @@ export type { Storage, WithLockOptions, WithLockResult, LockLogger, LockContext,
 export { withLock } from './storage/Storage';
 export { RedisStorage } from './storage/RedisStorage';
 export { MemoryStorage } from './storage/MemoryStorage';
+export { BestEffortWrapper } from './storage/BestEffortWrapper';
+export type { BestEffortWrapperOptions } from './storage/BestEffortWrapper';
 export { InMemoryJobQueueAdapter } from './jobQueue/InMemoryJobQueueAdapter';
 export { HttpJobQueueEngineClient } from './jobQueue/HttpJobQueueEngineClient';
 export { HttpJobQueueEngineServer } from './jobQueue/HttpJobQueueEngineServer';

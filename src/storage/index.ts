@@ -3,6 +3,8 @@ import { MemoryStorage } from './MemoryStorage';
 
 export type { Storage, StoredJobState, LockResult, StatusListener } from './Storage';
 export { MemoryStorage } from './MemoryStorage';
+export { BestEffortWrapper } from './BestEffortWrapper';
+export type { BestEffortWrapperOptions } from './BestEffortWrapper';
 export { RedisStorage } from './RedisStorage';
 export { DurableObjectStorage } from './DurableObjectStorage';
 export type { DurableObjectState, DurableObjectStorageAPI, SqlStorage, SqlStorageCursor } from './DurableObjectStorage';
